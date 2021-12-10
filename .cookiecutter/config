@@ -1,0 +1,5 @@
+# Change these at your peril:
+export PROJECT_OPENNESS=public
+export PROJECT_NAME=mapping_parenting_tech
+export REPO_NAME=mapping_parenting_tech
+export GITHUB_ACCOUNT=nestauk
