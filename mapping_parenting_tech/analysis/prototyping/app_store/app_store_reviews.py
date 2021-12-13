@@ -155,25 +155,31 @@ pd.sample(10)
 # %% [markdown]
 # Code below is obsolete / testing code
 
-# %%
-from mapping_parenting_tech.analysis.prototyping.app_store.api.itunes_app_scraper.scraper import (
-    AppStoreScraper,
-)
+# %% [markdown]
+# '''
+# Deprecated - this was me trying to use an API to scrape the App store
+#
+# from mapping_parenting_tech.analysis.prototyping.app_store.api.itunes_app_scraper.scraper import AppStoreScraper
+#
+# scraper = AppStoreScraper()
+# results = scraper.get_app_ids_for_query("fortnite", country="gb", lang="en")
+# similar = scraper.get_similar_app_ids_for_app(results[0])
+#
+# app_details = scraper.get_multiple_app_details(similar)
+# #print(list(app_details))
+# '''
 
-scraper = AppStoreScraper()
-results = scraper.get_app_ids_for_query("fortnite", country="gb", lang="en")
-similar = scraper.get_similar_app_ids_for_app(results[0])
-
-app_details = scraper.get_multiple_app_details(similar)
-# print(list(app_details))
-
-# %%
-from api.itunes_app_scraper.scraper import AppStoreScraper
-
-apps = AppStoreScraper()
-foo = apps.get_app_ids_for_query("minecraft", num=10, country="gb", lang="en")
-
-print(foo)
+# %% [markdown]
+# '''
+# as above
+#
+# from api.itunes_app_scraper.scraper import AppStoreScraper
+#
+# apps = AppStoreScraper()
+# foo = apps.get_app_ids_for_query("minecraft", num=10, country="gb", lang="en")
+#
+# print(foo)
+# '''
 
 # %%
 country = "gb"
