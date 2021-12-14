@@ -58,7 +58,7 @@ inputs-push:
 
 .PHONY: outputs-pull
 ## Pull `outputs/` from S3 (WARNING: this may overwrite existing local files!)
-outputs-push:
+outputs-pull:
 	$(call execute_in_env, aws s3 sync s3://${BUCKET}/outputs outputs)
 
 .PHONY: outputs-push
