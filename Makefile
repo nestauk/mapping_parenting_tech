@@ -47,7 +47,7 @@ install: .cookiecutter/state/conda-create .cookiecutter/state/setup-git .cookiec
 	@direnv reload  # Now the conda env exists, reload to activate it
 
 .PHONY: inputs-pull
-## Pull `inputs/` from S3
+## Pull `inputs/` from S3 (WARNING: this may overwrite existing local files!)
 inputs-pull:
 	$(call execute_in_env, aws s3 sync s3://${BUCKET}/inputs inputs)
 
@@ -55,6 +55,16 @@ inputs-pull:
 ## Push `inputs/` to S3 (WARNING: this may overwrite existing files!)
 inputs-push:
 	$(call execute_in_env, aws s3 sync inputs s3://${BUCKET}/inputs)
+
+.PHONY: outputs-pull
+## Pull `outputs/` from S3 (WARNING: this may overwrite existing local files!)
+outputs-push:
+	$(call execute_in_env, aws s3 sync s3://${BUCKET}/outputs outputs)
+
+.PHONY: outputs-push
+## Push `outputs/` to S3 (WARNING: this may overwrite existing files!)
+outputs-push:
+	$(call execute_in_env, aws s3 sync outputs s3://${BUCKET}/outputs)
 
 .PHONY: docs
 ## Build the API documentation
