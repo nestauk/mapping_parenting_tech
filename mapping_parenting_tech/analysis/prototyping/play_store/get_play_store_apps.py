@@ -27,9 +27,9 @@ from tqdm import tqdm
 import re
 import json
 import sys
-
-INPUT_PATH = Path("~/github/mapping_parenting_tech/inputs/data/")
-OUTPUT_PATH = Path("~/github/mapping_parenting_tech/outputs/data/")
+from mapping_parenting_tech import PROJECT_DIR, logging
+INPUT_PATH = PROJECT_DIR / "inputs/data"
+OUTPUT_PATH =PROJECT_DIR / "outputs/data"
 STORE_PATH = "play_store/"
 PLAY_DATA_FILE = "playstore_innerHTML.html"
 OUTPUT_PLAY_IDS_FILE = "play_store_ids.json"
@@ -39,9 +39,9 @@ OUTPUT_PLAY_REVIEWS_FILE = "play_store_reviews.json"
 input_data = INPUT_PATH.expanduser() / STORE_PATH / PLAY_DATA_FILE
 
 if input_data.exists():
-    print("Ok to proceed")
+    logging.info("Ok to proceed")
 else:
-    print("Didn't find file")
+    logging.warning("Didn't find file")
 
 
 # %% [markdown]
@@ -49,9 +49,8 @@ else:
 # Read HTML and extract list of app ids
 
 # %%
-html_doc = open(input_data, "r")
-html = html_doc.read()
-html_doc.close
+with open(input_data, "r") as infile:
+    html = infile.read()
 
 link_targets = re.findall(r"(?<=href=\"\/store\/apps\/details\?id=)(.*?)(?=\")", html)
 app_ids = list(dict.fromkeys(link_targets))
