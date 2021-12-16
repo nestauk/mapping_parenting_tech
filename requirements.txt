@@ -9,7 +9,11 @@ filelock
 typer
 sh
 tomotopy
-sentence_transformers
+sentence-transformers
 umap
 hdbscan
 altair
+textacy
+spacy
+gensim
+pandas-profiling
