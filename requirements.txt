@@ -17,3 +17,6 @@ textacy
 spacy
 gensim
 pandas-profiling
+altair-saver
+selenium
+webdriver-manager
