@@ -9,3 +9,14 @@ filelock
 typer
 sh
 tomotopy
+sentence-transformers
+umap
+hdbscan
+altair
+textacy
+spacy
+gensim
+pandas-profiling
+altair-saver
+selenium
+webdriver-manager
