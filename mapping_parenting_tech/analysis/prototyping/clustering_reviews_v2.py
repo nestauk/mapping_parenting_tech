@@ -95,60 +95,156 @@ df = reviews_df_subsample.copy()
 df["x"] = embedding[:, 0]
 df["y"] = embedding[:, 1]
 df["cluster"] = [str(x) for x in clusterer.labels_]
+df["score"] = df.score.astype(str)
+df = df.rename(columns={"title": "appTitle"})
+
+df.head(1)
+
+# ## Getting cluster labels
+#
+# - Find all tokens within a cluster
+# - Calculate the cluster centroid
+# - Find the token embeddings
+# - Find tokens that are closest to the centroid
+# - Get the most frequent, closest tokens
 
 # +
-# Visualise using altair (NB: -1=points haven't been assigned to a cluster)
-fig = (
-    alt.Chart(df[df.cluster != "-1"], width=500, height=500)
-    .mark_circle(size=60, opacity=0.05)
-    .encode(
-        x="x",
-        y="y",
-        tooltip=["content_sentence", "content_sentence_tokens", "cluster", "appId"],
-        color="cluster",
-    )
-).interactive()
+from ast import literal_eval
+from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
+from scipy.spatial.distance import cdist
 
-fig
+
+def check_most_similar(vect, vects):
+    sims = cdist(vect.reshape(1, -1), vects, "cosine")
+    return list(np.argsort(sims[0]))
+
+
 # -
 
+# Load sentence embeddings
+token_embeddings = np.load(INPUT_DATA / f"embeddings/{TOKENS_EMBEDDINGS}")
+token_table = pd.read_csv(INPUT_DATA / f"embeddings/reviews_tokens.csv")
+
+print(token_embeddings.shape)
+print(len(token_table))
+
 df_cluster = df.copy()
+len(df_cluster)
 
-from ast import literal_eval
-
+# Get cluster tokens
 df_cluster["cluster_tokens"] = df_cluster.content_sentence_tokens.apply(
     lambda x: literal_eval(x)
 )
 
-clust_docs = []
-for cluster in df.cluster.unique():
-    clust_tokens = df_cluster[df_cluster.cluster == cluster].cluster_tokens.to_list()
-    clust_tokens = [c for cs in clust_tokens for c in cs]
-    clust_docs.append(clust_tokens)
 
-from sklearn.feature_extraction.text import TfidfVectorizer
+# +
+# # Cluster documents
+# clust_docs = []
+# for cluster in df.cluster.unique():
+#     clust_tokens = df_cluster[df_cluster.cluster == cluster].cluster_tokens.to_list()
+#     clust_tokens = [c for cs in clust_tokens for c in cs]
+#     clust_docs.append(clust_tokens)
 
-vectorizer = TfidfVectorizer(  # CountVectorizer(
-    analyzer="word",
-    tokenizer=lambda x: x,
-    preprocessor=lambda x: x,
-    token_pattern=None,
+# +
+# # Cluster centroids
+# cluster = '5'
+# clust_df = df_cluster[df_cluster.cluster == cluster]
+# clust_indices = clust_df.index.to_list()
+# clust_centroid = sentence_embeddings[clust_indices,:].mean(axis=0)
+
+# +
+# clust_df.sample(5).content
+# -
+
+
+def topic_keywords(clust_docs, topic_words=True, n=10, Vectorizer=TfidfVectorizer):
+
+    vectorizer = Vectorizer(  # CountVectorizer(
+        analyzer="word",
+        tokenizer=lambda x: x,
+        preprocessor=lambda x: x,
+        token_pattern=None,
+    )
+    X = vectorizer.fit_transform(list(clust_docs))
+
+    id_to_token = dict(
+        zip(list(vectorizer.vocabulary_.values()), list(vectorizer.vocabulary_.keys()))
+    )
+
+    clust_words = []
+    for i in range(X.shape[0]):
+        x = X[i, :].todense()
+        if topic_words is None:
+            x = list(np.flip(np.argsort(np.array(x)))[0])[0:n]
+            clust_words.append([id_to_token[j] for j in x])
+        else:
+
+            # Cluster centroids
+            cluster = str(i)
+            clust_df = df_cluster[df_cluster.cluster == cluster]
+            clust_indices = clust_df.index.to_list()
+            clust_centroid = sentence_embeddings[clust_indices, :].mean(axis=0)
+            topic_words = (
+                token_table.iloc[check_most_similar(clust_centroid, token_embeddings)]
+                .head(500)
+                .token.to_list()
+            )
+
+            topic_words_ = [
+                t for t in topic_words if t in list(vectorizer.vocabulary_.keys())
+            ]
+            topic_word_counts = [
+                X[i, vectorizer.vocabulary_[token]] for token in topic_words_
+            ]
+            best_i = np.flip(np.argsort(topic_word_counts))
+            top_n = best_i[0:n]
+            words = [topic_words_[t] for t in top_n]
+            clust_words.append(words)
+    # logging.info(f"Generated keywords for {len(cluster_ids)} topics")
+    return clust_words
+
+
+topic_key_terms = topic_keywords(clust_docs, topic_words=True)
+
+topic_frequent_terms = topic_keywords(
+    clust_docs, topic_words=True, Vectorizer=CountVectorizer
 )
-X = vectorizer.fit_transform(list(clust_docs))
 
-id_to_token = dict(
-    zip(list(vectorizer.vocabulary_.values()), list(vectorizer.vocabulary_.keys()))
-)
+# +
+# topic_key_terms[2]
+# -
 
-n = 10
-clust_words = []
-for i in range(X.shape[0]):
-    x = X[i, :].todense()
-    x = list(np.flip(np.argsort(np.array(x)))[0])[0:n]
-    clust_words.append([id_to_token[j] for j in x])
-
-for i, c in enumerate(clust_words):
+for i, c in enumerate(topic_key_terms):
     print(i, c)
+
+topic_key_terms_dict = {str(i): str(terms) for i, terms in enumerate(topic_key_terms)}
+topic_key_terms_dict["-1"] = "noisy points"
+
+df["cluster_keywords"] = df.cluster.apply(lambda x: topic_key_terms_dict[x])
+
+# +
+# Visualise using altair (NB: -1=points haven't been assigned to a cluster)
+fig = (
+    alt.Chart(df[df.cluster != "-1"], width=800, height=800)
+    .mark_circle(size=60, opacity=0.33)
+    .encode(
+        x=alt.X("x", axis=alt.Axis(labels=False), title="dim 1"),
+        y=alt.Y("y", axis=alt.Axis(labels=False), title="dim 2"),
+        tooltip=[
+            "content_sentence",
+            "content_sentence_tokens",
+            "score",
+            "appTitle",
+            "cluster",
+            "cluster_keywords",
+        ],
+        color="cluster",
+    )
+    .configure_axis(grid=False)
+).interactive()
+
+fig
+# -
 
 # ## Clustering: k-means and reval
 
