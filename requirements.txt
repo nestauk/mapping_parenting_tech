@@ -10,7 +10,7 @@ typer
 sh
 tomotopy
 sentence-transformers
-umap
+umap-learn
 hdbscan
 altair
 textacy
