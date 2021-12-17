@@ -15,10 +15,15 @@
 # ---
 
 # %% [markdown]
-# foo
+# # Clustering of app descriptions
+# Takes descriptions of Play Store apps and clusters accordingly, producing a visualisation of the clusters.
 
 # %%
 from sentence_transformers import SentenceTransformer
+from mapping_parenting_tech.utils.altair_save_utils import (
+    google_chrome_driver_setup,
+    save_altair,
+)
 import umap
 import hdbscan
 import altair as alt
@@ -63,7 +68,9 @@ embedding_clustering = reducer_clustering.fit_transform(description_embeddings)
 
 # %%
 # Clustering with hdbscan
-clusterer = hdbscan.HDBSCAN(min_cluster_size=2)
+clusterer = hdbscan.HDBSCAN(
+    min_cluster_size=6, min_samples=1, cluster_selection_method="leaf"
+)
 clusterer.fit(embedding_clustering)
 
 # %%
@@ -78,7 +85,17 @@ df["cluster"] = [str(x) for x in clusterer.labels_]
 fig = (
     alt.Chart(df, width=500, height=500)
     .mark_circle(size=60)
-    .encode(x="x", y="y", tooltip=["summary"], color="cluster")
+    .encode(x="x", y="y", tooltip=["cluster", "app_id", "summary"], color="cluster")
 ).interactive()
 
 fig
+
+# %%
+of_interest = ["5", "13"]
+df[df.cluster.isin(of_interest)].app_id.to_list()
+
+# %%
+driver = google_chrome_driver_setup()
+
+# %%
+save_altair(fig, "cluster_descriptions", driver)
