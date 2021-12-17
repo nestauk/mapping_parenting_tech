@@ -17,3 +17,5 @@ textacy
 spacy
 gensim
 pandas-profiling
+reval
+scikit-learn
