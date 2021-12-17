@@ -19,3 +19,6 @@ gensim
 pandas-profiling
 reval
 scikit-learn
+altair-saver
+selenium
+webdriver-manager
