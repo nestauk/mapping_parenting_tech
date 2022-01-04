@@ -18,6 +18,14 @@
 # # Extract app ids from web pages saved from Google Play store
 
 # %% [markdown]
+# Code below carries out the following set of functions:
+# 1. retrieves the ids of apps from a Play Store web page that has been saved locally
+# 2. saves and loads app ids to/from a pickle file so they can be retrieved and used later
+# 3. downloads details for an app/s using its/their app id/s
+# 4. saves and loads app details so they can be retrieved and used later
+# 5.
+
+# %% [markdown]
 # Do imports and set file locations
 
 # %%
@@ -46,12 +54,13 @@ def get_playstore_app_ids(filename: str) -> list:
     Returns:
         List of app ids, each as a str
     """
+
     # open the input file
     with open(PROJECT_DIR / "inputs/data" / filename, "rt") as infile:
         html = infile.read()
 
-    # setup the regular expression
-    # works by looking for app ids in the links to apps on a category page (e.g., https://play.google.com/store/apps/collection/cluster?clp=0g4hCh8KGXRvcHNlbGxpbmdfZnJlZV9QQVJFTlRJTkcQBxgD:S:ANO1ljI8w1M&gsr=CiTSDiEKHwoZdG9wc2VsbGluZ19mcmVlX1BBUkVOVElORxAHGAM%3D:S:ANO1ljK7gT4)
+    # setup the regular expression that looks for app ids in the links to apps on a category page
+    # (e.g., https://play.google.com/store/apps/collection/cluster?clp=0g4hCh8KGXRvcHNlbGxpbmdfZnJlZV9QQVJFTlRJTkcQBxgD:S:ANO1ljI8w1M&gsr=CiTSDiEKHwoZdG9wc2VsbGluZ19mcmVlX1BBUkVOVElORxAHGAM%3D:S:ANO1ljK7gT4)
     # this is looking for a link ('href') to '/store/apps/details?id=' and it grabs the text after 'id'
     re_pattern = r"(?<=href=\"\/store\/apps\/details\?id=)(.*?)(?=\")"
 
@@ -83,7 +92,11 @@ def save_app_ids(app_list: list, filename: str) -> bool:
 
 
 # %%
-# save_app_ids(get_playstore_app_ids("play_store/parenting_top_grossing.html"), "parenting_top_grossing_ids.pickle")
+save_app_ids(
+    get_playstore_app_ids("play_store/parenting_top_grossing.html"),
+    "parenting_top_grossing_ids.pickle",
+)
+
 
 # %%
 def load_app_ids(filename: str) -> list:
@@ -102,7 +115,7 @@ def load_app_ids(filename: str) -> list:
 
 
 # %% [markdown]
-# Retrieve app details
+# ## Retrieve app details
 
 # %%
 def get_playstore_app_details(app_id_list: list):
@@ -134,10 +147,11 @@ def get_playstore_app_details(app_id_list: list):
 
 
 # %%
-# app_list = load_app_ids("outputs/data/top_free_parenting.pickle")
+app_list = load_app_ids("outputs/data/top_free_parenting.pickle")
 
 # %%
-# app_details = get_playstore_app_details(app_list)
+app_details = get_playstore_app_details(app_list)
+
 
 # %% [markdown]
 # ## Save and load app details to/from JSON file
@@ -145,7 +159,8 @@ def get_playstore_app_details(app_id_list: list):
 # %%
 def save_app_details(details_dict: dict, filename: str) -> bool:
     """
-    Saves JSON representation of app details. Will append to file <filename> if it already exists. Returns True if exits successfully
+    Saves JSON representation of app details. Will append to file <filename> if it already exists.
+    Returns True if exits successfully
     """
 
     output_target = PROJECT_DIR / "outputs/data/" / filename
@@ -170,10 +185,9 @@ def load_app_details(filename: str) -> json:
 
 # %% [markdown]
 # ## Download reviews for the apps in a given list of app ids
-# Ultimately, functions will enable iterative downloading into a single file, which is appended to as more reviews are added
+# These functions enable iterative downloading into a single file, which is appended as more reviews are added
 #
-# `fetch_play_app_reviews` gets reviews for a single app
-#
+# `get_playstore_app_reviews` gets up to 200 reviews for a single app and returns them as a list of dicts (JSON), while `get_playstore_app_list_reviews` retrievs reviews for a given list of apps and saves them to a CSV file.
 
 # %%
 def get_playstore_app_reviews(
@@ -234,7 +248,22 @@ def get_playstore_app_list_reviews(
     force_download: bool = False,
     run_quietly: bool = False,
 ):
-    """ """
+    """
+    Saves and returns reviews for a given list of apps on the Play Store using their ids (e.g., as returned by
+    get_playstore_app_ids)
+
+    Arguments:
+        app_id_list: list, list of app ids for the PLay Store
+        filename: str, target file to save the returned reviews
+        force_download: bool, true will force download of reviews, even if they've already been downloaded
+        run_quietly: bool, true will mean that no status updates are provided
+
+    The function returns a list of dict objects, which it also saves on-the-fly in the target file. `username` and
+    `userimage` are removed from the reviews that are returned and saved for data privacy.
+
+    `filename` is also used as the basis of a logfile `[filename].log`. If the function fails during run-time, it
+    will resume where it left off, provided the same filename is given.
+    """
 
     target_file = PROJECT_DIR / "outputs/data" / filename
     file_root = Path(target_file).stem
@@ -386,59 +415,5 @@ my_app_list = [
 
 my_app_reviews = get_playstore_app_list_reviews(my_app_list, "myapps.csv")
 
-# %%
-field_names = [
-    "content",
-    "score",
-    "thumbsUpCount",
-    "reviewCreatedVersion",
-    "at",
-    "replyContent",
-    "repliedAt",
-    "reviewId",
-    "appId",
-]
-
-moo = {}
-with open(PROJECT_DIR / "outputs/data/myapps.csv", "rt", newline="") as csvfile:
-    foo = csv.DictReader(csvfile, fieldnames=field_names)
-    blob = list(foo)
-
-print(json.dumps(blob[2222], default=str, indent=2))
-
-# %%
-all_app_reviews = dict()
-running_total = 0
-
-for app_id in tqdm(output_ids["Parenting apps"], desc="Retrieving app reviews"):
-    try:
-        app_reviews = reviews_all(
-            app_id,
-            sleep_milliseconds=0,  # defaults to 0
-            lang="en",
-            country="gb",
-            sort=Sort.NEWEST  # defaults to Sort.MOST_RELEVANT
-            # filter_score_with=5 # defaults to None(means all score)
-        )
-        all_app_reviews.update({app_id: app_reviews})
-        running_total += len(app_reviews)
-
-    except Exception as e:
-        logging.info(f"Error on app id {app_id}: {e} {repr(e)}")
-
-logging.info(f"Retrieved {running_total} reviews")
-
-
-# %%
-output_target = OUTPUT_PATH / OUTPUT_PLAY_REVIEWS_FILE
-with open(output_target, "w") as output_file:
-    json.dump(all_app_reviews, output_file, indent=2, default=str)
-output_file.close()
-
-print(f"{running_total} reviews saved to {output_target}")
-
-# %%
-
-# %%
-
-# %%
+# %% [markdown]
+# ### Development code
