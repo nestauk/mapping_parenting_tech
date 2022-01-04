@@ -3,23 +3,22 @@
 #   jupytext:
 #     cell_metadata_filter: -all
 #     comment_magics: true
-#     formats: ipynb,py:percent
+#     formats: ipynb,py:light
 #     text_representation:
 #       extension: .py
-#       format_name: percent
-#       format_version: '1.3'
-#       jupytext_version: 1.13.3
+#       format_name: light
+#       format_version: '1.5'
+#       jupytext_version: 1.13.4
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
 #     name: python3
 # ---
 
-# %% [markdown]
 # # Testing playstore API
 # https://pypi.org/project/google-play-scraper/
 
-# %%
+# +
 from google_play_scraper import app, Sort, reviews_all
 
 result = app(
@@ -27,21 +26,20 @@ result = app(
     lang="en",  # defaults to 'en'
     country="us",  # defaults to 'us'
 )
+# -
 
-# %%
 print(result)
 
-# %%
 targets = ["com.mushuk.mushapp", "com.easypeasyapp.epappns", "com.hp.pregnancy.lite"]
 
-# %%
+# +
 results = []
 for target in targets:
     results.append(app(f"{target}", lang="en", country="us"))
 
 print(len(results))
 
-# %%
+# +
 reviews = []
 for target in targets:
     reviews.append(
@@ -57,13 +55,11 @@ for target in targets:
 
 for review in reviews:
     print(len(review))
-# %%
+# +
 import pandas as pd
 
 review_df = pd.DataFrame(reviews[2])
+# -
 
 
-# %%
 review_df.head(5)
-
-# %%
