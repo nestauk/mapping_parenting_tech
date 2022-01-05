@@ -63,6 +63,8 @@ sentence_embeddings_sub = sentence_embeddings[reviews_df_subsample.index.to_list
 print(sentence_embeddings.shape)
 print(sentence_embeddings_sub.shape)
 
+5 / 36
+
 # Create a 2D embedding
 reducer = umap.UMAP(n_components=2, random_state=1)
 embedding = reducer.fit_transform(sentence_embeddings_sub)
@@ -125,6 +127,10 @@ def check_most_similar(vect, vects):
 token_embeddings = np.load(INPUT_DATA / f"embeddings/{TOKENS_EMBEDDINGS}")
 token_table = pd.read_csv(INPUT_DATA / f"embeddings/reviews_tokens.csv")
 
+# +
+# token_table.sample(20)
+# -
+
 print(token_embeddings.shape)
 print(len(token_table))
 
@@ -186,7 +192,7 @@ def topic_keywords(clust_docs, topic_words=True, n=10, Vectorizer=TfidfVectorize
             clust_centroid = sentence_embeddings[clust_indices, :].mean(axis=0)
             topic_words = (
                 token_table.iloc[check_most_similar(clust_centroid, token_embeddings)]
-                .head(500)
+                .head(100)
                 .token.to_list()
             )
 
@@ -210,6 +216,8 @@ topic_frequent_terms = topic_keywords(
     clust_docs, topic_words=True, Vectorizer=CountVectorizer
 )
 
+topic_basic_terms = topic_keywords(clust_docs, topic_words=None)
+
 # +
 # topic_key_terms[2]
 # -
@@ -222,26 +230,58 @@ topic_key_terms_dict["-1"] = "noisy points"
 
 df["cluster_keywords"] = df.cluster.apply(lambda x: topic_key_terms_dict[x])
 
+len(df[df.cluster == "-1"]) / len(df)
+
 # +
 # Visualise using altair (NB: -1=points haven't been assigned to a cluster)
 fig = (
-    alt.Chart(df[df.cluster != "-1"], width=800, height=800)
+    alt.Chart(
+        df[df.cluster != "-1"],
+        # df,
+        width=800,
+        height=800,
+    )
     .mark_circle(size=60, opacity=0.33)
     .encode(
         x=alt.X("x", axis=alt.Axis(labels=False), title="dim 1"),
         y=alt.Y("y", axis=alt.Axis(labels=False), title="dim 2"),
-        tooltip=[
-            "content_sentence",
-            "content_sentence_tokens",
-            "score",
-            "appTitle",
-            "cluster",
-            "cluster_keywords",
-        ],
+        tooltip=["content_sentence", "score", "appTitle", "cluster"],
         color="cluster",
     )
     .configure_axis(grid=False)
 ).interactive()
+
+fig
+
+# +
+from mapping_parenting_tech.utils.altair_save_utils import (
+    google_chrome_driver_setup,
+    save_altair,
+)
+
+driver = google_chrome_driver_setup()
+# -
+
+save_altair(fig, "Parenting_app_reviews", driver)
+
+# +
+# Visualise using altair (NB: -1=points haven't been assigned to a cluster)
+fig = (
+    alt.Chart(
+        df[df.cluster != "-1"],
+        # df,
+        width=800,
+        height=800,
+    )
+    .mark_circle(size=60, opacity=0.9)
+    .encode(
+        x=alt.X("x", axis=alt.Axis(labels=False), title="dim 1"),
+        y=alt.Y("y", axis=alt.Axis(labels=False), title="dim 2"),
+        tooltip=["content_sentence", "score", "appTitle", "cluster"],
+        color="score",
+    )
+    .configure_axis(grid=False)
+)
 
 fig
 # -
