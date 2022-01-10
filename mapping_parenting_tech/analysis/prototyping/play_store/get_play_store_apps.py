@@ -257,7 +257,7 @@ def get_playstore_app_details(app_id_list: list):
             all_app_details.append({app_id: app_details})
 
         except Exception as e:  # needs modifying to capture specific errors
-            logging.info(f"Error on app id {app_id}: {e} {repr(e)}")
+            logging.warning(f"Error on app id {app_id}: {e} {repr(e)}")
             remove_apps.append(app_id)
 
     for app_id in remove_apps:
@@ -355,7 +355,7 @@ def get_playstore_app_reviews(
 
     if target_app_id == "":
         logging.warning("No app id given")
-        raise Exception("App id must be provided")
+        return False
 
     if how_many > 200:
         how_many = 200
