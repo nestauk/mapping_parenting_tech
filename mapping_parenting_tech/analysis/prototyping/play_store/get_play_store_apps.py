@@ -187,6 +187,7 @@ def save_app_ids(
         for app_id in app_list:
             csv_writer.writerow([app_id])
 
+    logging.info(f"App ids saved in {output_target}")
     # if we got here, it's all ok so return True
     return True
 
