@@ -289,6 +289,7 @@ def save_app_details(
     with open(output_target, "at") as output_file:  # append in text mode
         json.dump(details_dict, output_file, indent=2, default=str)
 
+    logging.info(f"App details saved in {output_target}")
     return True
 
 
