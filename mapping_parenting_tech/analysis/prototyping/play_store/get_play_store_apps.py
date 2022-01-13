@@ -32,6 +32,7 @@ import re
 import json
 import pickle
 import csv
+import pandas as pd
 from google_play_scraper import Sort, app, reviews
 from tqdm import tqdm
 from pathlib import Path
@@ -147,7 +148,7 @@ def app_snowball(seed_app_id: str, depth: int = 5, __current_depth: int = 1) -> 
     """
 
     app_details = app(seed_app_id, country="gb")
-    similar_apps = app_details["similarApps"]
+    similar_apps = app_details["similarApps"] if app_details is not None else list()
 
     snowball = set()
     snowball.update(similar_apps)
@@ -188,6 +189,7 @@ def save_app_ids(
             csv_writer.writerow([app_id])
 
     logging.info(f"App ids saved in {output_target}")
+
     # if we got here, it's all ok so return True
     return True
 
@@ -261,9 +263,6 @@ def get_playstore_app_details(app_id_list: list):
             logging.warning(f"Error on app id {app_id}: {e} {repr(e)}")
             remove_apps.append(app_id)
 
-    for app_id in remove_apps:
-        all_app_details.pop(app_id, None)
-
     return all_app_details
 
 
@@ -290,6 +289,7 @@ def save_app_details(
         json.dump(details_dict, output_file, indent=2, default=str)
 
     logging.info(f"App details saved in {output_target}")
+
     return True
 
 
@@ -393,14 +393,13 @@ def _init_target_file(target_file: str) -> list:
     newfile = False if target_file.exists() else True
 
     existing_review_ids = list()
-    with open(target_file, "at+", newline="") as csv_file:
-        if newfile:
+    if newfile:
+        with open(target_file, "at+", newline="") as csv_file:
             csv_writer = csv.DictWriter(csv_file, fieldnames=FIELD_NAMES)
             csv_writer.writeheader()
-        else:
-            csv_file.seek(0)
-            fetched_reviews = csv.DictReader(csv_file)
-            existing_review_ids = [r["reviewId"] for r in fetched_reviews]
+    else:
+        pd_col = pd.read_csv(target_file, usecols=["reviewId"])
+        existing_review_ids = pd_col["reviewId"].to_list()
 
     return existing_review_ids
 
@@ -649,6 +648,43 @@ def load_app_reviews(filename: str, folder: str = APP_IDS_PATH) -> list:
 # %% [markdown]
 # ## Putting it together
 # ### Retrieving and using app ids via a set of downloaded web pages
+
+# %%
+def retrieve_app_set(seed: str, base_name: str, **kwargs):
+    """
+    Carries out the steps to retrieve the details for a given set of apps and saves the relevant output files.
+
+    """
+
+    file_names = {
+        "ids": base_name + "_ids.csv",
+        "details": base_name + "_details.json",
+        "reviews": base_name + "_reviews.csv",
+    }
+
+    options = {"ids": True, "details": True, "reviews": True}
+    options.update(kwargs)
+
+    app_ids = parse_folder_for_app_ids(seed)
+
+    if options["ids"]:
+        save_app_ids(app_ids, seed, file_names["ids"])
+
+    if options["details"]:
+        save_app_details(get_playstore_app_details(app_ids), file_names["details"])
+
+    if options["reviews"]:
+        save_playstore_app_list_reviews(app_ids, file_names["reviews"])
+
+
+# %%
+app_sets = {
+    "education_apps": "play_store/education_apps",
+    "parenting_apps": "play_store/parenting_apps",
+}
+
+for apps, folder in app_sets.items():
+    retrieve_app_set(folder, apps, ids=False, details=False)
 
 # %%
 app_ids = parse_folder_for_app_ids("play_store/kids_under_five")
