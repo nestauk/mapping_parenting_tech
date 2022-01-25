@@ -66,6 +66,10 @@ reducer = umap.UMAP(n_components=2, random_state=1)
 embedding = reducer.fit_transform(description_embeddings)
 
 # %%
+# Check the shape of the reduced embedding array
+embedding.shape
+
+# %%
 # Create another low-dim embedding for clustering
 reducer_clustering = umap.UMAP(n_components=50, random_state=1)
 embedding_clustering = reducer_clustering.fit_transform(description_embeddings)
@@ -256,7 +260,6 @@ def get_cluster_info(needle: int, haystack: dict):
             return (k, v[needle])
 
     return 0
-
 
 # %%
 driver = google_chrome_driver_setup()

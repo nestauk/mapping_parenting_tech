@@ -20,3 +20,4 @@ pandas-profiling
 altair-saver
 selenium
 webdriver-manager
+google-play-scraper
