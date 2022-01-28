@@ -4,7 +4,7 @@
 #   jupytext:
 #     cell_metadata_filter: -all
 #     comment_magics: true
-#     formats: ipynb,py
+#     formats: ipynb,py:light
 #     text_representation:
 #       extension: .py
 #       format_name: light
@@ -57,6 +57,12 @@ reviews_metadata = reviews_metadata.explode("sentences")
 reviews_random_sample = reviews_metadata.sample(3000, random_state=1)
 # -
 
+reviews_random_sample.head(3)
+
+sentence_subsample = reviews_random_sample.sentences.to_list()
+
+sentence_subsample[0:10]
+
 # Generate sentence embeddings (might take a few minutes for 1000s of sentences)
 sentence_embeddings = np.array(model.encode(reviews_random_sample.sentences.to_list()))
 
@@ -89,7 +95,8 @@ df["cluster"] = [str(x) for x in clusterer.labels_]
 fig = (
     alt.Chart(df, width=500, height=500)
     .mark_circle(size=60)
-    .encode(x="x", y="y", tooltip=["sentences"], color="cluster")
+    .encode(x="x", y="y", tooltip=["sentences", "appId"], color="cluster")
 ).interactive()
 
 fig
+# -
