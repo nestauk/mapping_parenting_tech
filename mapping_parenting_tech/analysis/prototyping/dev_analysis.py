@@ -38,11 +38,29 @@ app_data.reset_index(inplace=True)
 app_data.rename(columns={"index": "appId"}, inplace=True)
 
 # %%
-dev_groups = app_data.groupby(["developer"]).count()
-dev_groups[dev_groups["appId"] >= 20].sort_values("appId")
+dev_groups = app_data.groupby(["developer"])
 
 # %%
-dev_groups[dev_groups["appId"] >= 20].appId.sum()
+dev_counts = dev_groups["developer"].count()
+dev_counts[dev_counts >= 11].sort_values(ascending=False)
 
-# %% [raw]
-#
+# %%
+dev_counts[dev_counts["appId"] >= 20].appId.sum()
+
+# %%
+dev_installs = dev_groups["minInstalls"].sum()
+dev_ratings = dev_groups["score"].mean()
+
+# %%
+df_data = {
+    "appCount": dev_counts,
+    "dev_installs": dev_installs,
+    "dev_ratings": dev_ratings,
+}
+dev_df = pd.concat(df_data, axis=1)
+dev_df.sort_values("dev_installs", ascending=False).head(20)
+
+# %%
+app_data.columns
+
+# %%
