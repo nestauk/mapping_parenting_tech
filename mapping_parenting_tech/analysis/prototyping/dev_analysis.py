@@ -43,6 +43,3 @@ dev_groups[dev_groups["appId"] >= 20].sort_values("appId")
 
 # %%
 dev_groups[dev_groups["appId"] >= 20].appId.sum()
-
-# %% [raw]
-#
