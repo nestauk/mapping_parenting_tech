@@ -1,714 +1,1069 @@
-# ---
-# jupyter:
-#   jupytext:
-#     cell_metadata_filter: -all
-#     comment_magics: true
-#     text_representation:
-#       extension: .py
-#       format_name: percent
-#       format_version: '1.3'
-#       jupytext_version: 1.13.4
-#   kernelspec:
-#     display_name: 'Python 3.8.12 64-bit (''mapping_parenting_tech'': conda)'
-#     language: python
-#     name: python3
-# ---
-
-# %% [markdown]
-# # Extract app ids from web pages saved from Google Play store
-# The notebook below establishes and tests functions to achieve the following:
-# 1. retrieve the ids of apps from the Play Store
-# 2. save and load app ids so they can be saved, retrieved and used later
-# 3. download details for an app/s using its/their app id/s
-# 4. save and load app details so they can be saved, retrieved and used later
-# In step 4, app details are saved on-the-fly, as they are retrieved. As this step can take some time for 100s of apps or for apps with 1,000s of reviews (or both), the process can timeout or fail unexpectedly. Saving app details as they are retrieved allows the step to be resumed part-way through as a log file is saved with details of progress for each app.
-# These functions are dependent on the [google_play_scraper](https://pypi.org/project/google-play-scraper/) library.
-
-# %% [markdown]
-# ## Do imports and set file locations
-
-# %%
-import re
-import json
-import pickle
-import csv
-import pandas as pd
-from google_play_scraper import Sort, app, reviews
-from tqdm import tqdm
-from pathlib import Path
-from mapping_parenting_tech import PROJECT_DIR, logging
-from typing import Iterator
-
-APP_IDS_PATH = PROJECT_DIR / "outputs/data"
-
-# Field names being used in the CSV file
-FIELD_NAMES = (
-    "appId",
-    "content",
-    "score",
-    "thumbsUpCount",
-    "reviewCreatedVersion",
-    "at",
-    "replyContent",
-    "repliedAt",
-    "reviewId",
-)
-
-
-# %% [markdown]
-# ## Functions to retrieve app ids
-# `get_playstore_app_ids` takes a local (downloaded) HTML page from the Play Store, specified by `filename`, and extracts app ids from it. As the Play Store loads items dynamically on scrolling, it's necessary to scroll to the bottom of the page, use a DOM Inspector (provided within Firefox, Safari, Chrome) and copy and paste the HTML surrounding the list of app links. Typically, this is a `div` element of class `ZmHEEd`.
-#
-# `parse_folder_for_app_ids` takes a folder and looks for HTML files (as described above) and calls `get_playstore_app_ids` on each one. It returns a single consolidated list of app ids. In this way, the various Play Store pages for an area (e.g., Parenting: top paid, top free, trending, etc.) can be consolidated into a single list of apps.
-#
-# `app_snowball` takes an app id and uses it to find related apps by using the similar apps listed on each app's page (details). It then looks at the similar apps listed on those apps' pages and so on. The `depth` argument specifies how many iterations down the process should go; the default is 5, which takes ~6 minutes (each extra step will take expotentially longer).
-#
-# `save_app_ids` saves a given list of app ids (i.e., from one of the steps above) and saves them to a CSV file. It takes the apps' category (e.g., *Education* or *under fives*) as a heading for its single column of data.
-#
-# `load_app_ids` retrieves the ids saved by `save_app_ids`. **NOTE** it returns two variables, the first is the category heading, the second is the list of app ids.
-
-# %%
-def get_playstore_app_ids(filename: str) -> list:
-    """
-    Looks inside 'inputs/data' int the project directory for a given HTML file (filename) and scans that file
-    for links containing ids to Play Store apps.
-
-    Args:
-        filepath: str - the file name of the HTML file you wish to get app ids from. Must be in
-        <[project directory]/inputs/data/> and should include further path details if file is in a sub-folder
-        e.g., `play_store/app_page.html`
-
-    Returns:
-        List of app ids, each as a str
-    """
-
-    # open the input file
-    with open(PROJECT_DIR / filename, "rt") as infile:
-        html = infile.read()
-
-    # setup the regular expression that looks for app ids in the links to apps on a category page
-    # (e.g., https://play.google.com/store/apps/collection/cluster?clp=0g4hCh8KGXRvcHNlbGxpbmdfZnJlZV9QQVJFTlRJTkcQBxgD:S:ANO1ljI8w1M&gsr=CiTSDiEKHwoZdG9wc2VsbGluZ19mcmVlX1BBUkVOVElORxAHGAM%3D:S:ANO1ljK7gT4)
-    # this is looking for a link ('href') to '/store/apps/details?id=' and it grabs the text after 'id'
-    re_pattern = r"(?<=href=\"\/store\/apps\/details\?id=)(.*?)(?=\")"
-
-    # retrieve all RE matches - this will return duplicates
-    link_targets = re.findall(re_pattern, html)
-
-    # convert list of links into a dict to remove duplicates, and back into a list
-    app_ids = list(set(link_targets))
-
-    return app_ids
-
-
-# %%
-def parse_folder_for_app_ids(folder: str) -> list:
-    """
-    Scans a folder for HTML files and extracts the app ids from those files, returning a unified, de-duplicated list of app ids.
-
-    Args:
-        folder: str - the folder to be scanned. This should be located in 'inputs/data' in a Nesta cookiecutter project
-
-    Returns:
-        A list object of Play Store app ids, each as a str
-
-    """
-
-    target_folder = PROJECT_DIR / "inputs/data" / folder
-    app_id_list = list()
-
-    # iterate .html files in the given folder, pass them to get_playstore_app_ids and assign results by extending app_id_list
-    app_id_list.extend(
-        [
-            get_playstore_app_ids(file_name)
-            for file_name in target_folder.iterdir()
-            if (file_name.is_file() and file_name.suffix == ".html")
-        ]
-    )
-
-    # flatten app_id_list (each file parsed will have returned a separate list)
-    app_id_list = [item for sublist in app_id_list for item in sublist]
-
-    # use `set` to remove duplicates in the return
-    return list(set(app_id_list))
-
-
-# %%
-def app_snowball(seed_app_id: str, depth: int = 5, __current_depth: int = 1) -> list:
-    """
-    Retrieves ids of Play Store apps related to `seed_app_id` by calling itself recursively.
-
-    Args:
-        seed_app_id: str - the app id of the app of interest
-        depth: int, default = 5 - the depth of recursion. This will increase the number of apps interrogated (and
-        therefore the time taken for the initial call to complete) exponentially
-        current_depth: used for recursion, should be left blank by user
-
-    Returns:
-        a list of app ids
-    """
-
-    app_details = app(seed_app_id, country="gb")
-    similar_apps = app_details["similarApps"] if app_details is not None else list()
-
-    snowball = set()
-    snowball.update(similar_apps)
-
-    if __current_depth < depth:
-        for this_app in similar_apps:
-            snowball.update(app_snowball(this_app, depth, (__current_depth + 1)))
-
-    return list(snowball)
-
-
-# %%
-def save_app_ids(
-    app_list: list, app_category: str, filename: str, output_path: Path = APP_IDS_PATH
-) -> bool:
-    """
-    Saves a list of app ids to a given CSV file. If the file already exists, it is overwritten.
-
-    Args:
-        app_list: list - a list of app ids to be saved
-        app_category: str - the title of the app category being saved, used as the header at the top of the list
-        filename: str - the filename to be used, including extension
-        output_path: Path - destination folder; default is `outputs/data`
-
-    Returns:
-        True if executed successfully
-
-    """
-
-    output_target = output_path / filename
-
-    with open(output_target, "wt", newline="\n") as output_file:
-        csv_writer = csv.writer(output_file)
-        csv_writer.writerow([app_category])
-        # NB can't use writerows() as it will treat each string as a list and split it into comma-separated letters
-        # hence why `app_id` (and `app_category`, above) is encapsulated in square brackets
-        for app_id in app_list:
-            csv_writer.writerow([app_id])
-
-    logging.info(f"App ids saved in {output_target}")
-
-    # if we got here, it's all ok so return True
-    return True
-
-
-# %%
-def load_app_ids(filename: str, file_path: Path = APP_IDS_PATH) -> tuple:
-    """
-    Loads a pickled list of app ids from a given file and returns the list object
-
-    Args:
-        filename: str - file name of pickle file to load within PARENT_DIR
-        file_path: Path - location of the file given in `filename`; default is `outputs/data`
-
-    Returns:
-        str: the name of the app category
-        list: list of app ids
-
-    """
-
-    app_id_list = []
-    with open(file_path / filename, "rt") as id_list:
-        csv_reader = csv.reader(id_list)
-        for app_id in csv_reader:
-            app_id_list.extend(app_id)
-
-    app_category = app_id_list.pop(0)
-    return (app_category, app_id_list)
-
-
-# %% [markdown]
-# ## Retrieving app details
-# These functions get details for a given list of apps, specified by their ids (as retrieved above) and save and load those details.
-#
-# `get_playstore_app_details` takes a list of app ids and returns the details for those apps as a list of `dict` objects. The schema for each `dict` can be seen on [https://pypi.org/project/google-play-scraper/](https://pypi.org/project/google-play-scraper/)
-#
-# `save_app_details` saves the list of `dicts` retrieved by `get_playstore_app_details`
-#
-# `load_app_details` loads the app details saved by `save_app_details`
-
-# %%
-def get_playstore_app_details(app_id_list: list):
-    """
-    Uses `google-play-scraper` (https://pypi.org/project/google-play-scraper/) to retrieve details about apps given in
-    `app_id_list` and returns dict of app details
-
-    Args:
-        app_id_list: list - a list of app ids from which details will be retrieved
-
-    Returns:
-        List of dict objects with app details. Each dict includes:
-        - title
-        - appId
-        - description
-        - summary
-        for specifics of all data returned, see https://pypi.org/project/google-play-scraper/
-
-    """
-
-    all_app_details = list()
-    remove_apps = list()
-
-    for app_id in tqdm(
-        app_id_list,
-        desc="Retrieving app details",
-    ):
-        try:
-            app_details = app(app_id, country="gb")
-            all_app_details.append({app_id: app_details})
-
-        except Exception as e:  # needs modifying to capture specific errors
-            logging.warning(f"Error on app id {app_id}: {e} {repr(e)}")
-            remove_apps.append(app_id)
-
-    return all_app_details
-
-
-# %%
-def save_app_details(
-    details_dict: dict, filename: str, folder: str = APP_IDS_PATH
-) -> bool:
-    """
-    Saves JSON representation of app details. Will append to file <filename> if it already exists.
-    Returns True if exits successfully
-
-    Args:
-        details_dict: dict - a dictionary of app details
-        filename: str - name of the file to save the details to
-        folder: str, default is `APP_IDS_PATH` - name of the folder where `filename` is to be saved
-
-    Returns:
-        True if successful
-
-    """
-
-    output_target = folder / filename
-    with open(output_target, "at") as output_file:  # append in text mode
-        json.dump(details_dict, output_file, indent=2, default=str)
-
-    logging.info(f"App details saved in {output_target}")
-
-    return True
-
-
-# %%
-def load_app_details(filename: str, folder: str = APP_IDS_PATH) -> json:
-    """
-    Loads JSON file containing app details from <filename>. Returns JSON object.
-
-    Args:
-        filename: str - the name of the file where the app details are saved
-        folder: str, default = `APP_IDS_PATH` - the folder where `filename` is located
-
-    """
-
-    result = {}
-    with open(folder / filename, "rt") as input_file:
-        result = json.load(input_file)
-
-    return result
-
-
-# %% [markdown]
-# ## Download reviews for the apps in a given list of app ids
-# These functions enable iterative downloading into a single file, which is appended as more reviews are added
-#
-# `get_playstore_app_reviews` gets up to 200 reviews for a single app and returns them as a list of dicts (JSON)
-#
-# `save_playstore_app_list_reviews` retrievs reviews for a given list of apps and saves them on-the-fly to a CSV file. If this function is interrupted, it can be called again witht the same parameters to resume where it left off. This function uses several helper functions:
-# - _init_target_file: if the target CSV file doesn't exist, this function creates it
-# - _init_log_file: initialises the log file that saves details about the progress of `save_playstore_app_list_reviews`
-# - _process_review_grab: parses the reviews as they are retrieved by `save_playstore_app_list_reviews`, removing fields containing personal data, adding the app id and deduplicating.
-# - _update_log_file: updates the log file with details about the progress of `save_playstore_app_list_reviews`
-#
-# `load_app_reviews` retrieves the app reviews from the CSV file saved by `save_playstore_app_list_reviews`
-
-# %%
-def get_playstore_app_reviews(
-    target_app_id, how_many: int = 200, continuation_token: object = None
-) -> (Iterator[dict], object):
-    """
-    Returns up to 200 reviews for a given app in the Google Play Store. If more reviews are available, 'continuation_token' is also returned, which can then
-    be passed as a parameter to indicate where the function should resume.
-
-    Args:
-        target_app_id: id of the app for which you want to download reviews
-        how_many: number of reviews you wish to download in one grab; defaults to 200, which is the maximum option
-        continuation_token: indicates that the function should continue fetching reviews from this point
-
-    Returns:
-        1. a list of reviews, each as a dict (see below)
-        2. continuation_token: object to pass back to this function to pick up where it left off
-
-    The reviews themselves are dicts in the following format:
-        "userName": str,
-        "userImage": str,
-        "content": str,
-        "score": int,
-        "thumbsUpCount": int,
-        "reviewCreatedVersion": str,
-        "at": datetime.datetime,
-        "replyContent": str,
-        "repliedAt": datetime.datetime,
-        "reviewId": str
-    """
-
-    if target_app_id == "":
-        logging.warning("No app id given")
-        return False
-
-    if how_many > 200:
-        how_many = 200
-
-    if continuation_token is None:
-        fetch_reviews, continuation_token = reviews(
-            app_id=target_app_id,
-            lang="en",
-            country="gb",
-            sort=Sort.NEWEST,
-            count=how_many,
-        )
-    else:
-        fetch_reviews, continuation_token = reviews(
-            app_id=target_app_id, continuation_token=continuation_token
-        )
-
-    return (fetch_reviews, continuation_token)
-
-
-# %%
-def _init_target_file(target_file: str) -> list:
-    """
-    Helper function for `save_playstore_app_list_reviews` that initialises the file where reviews are to be saved.
-    The target file is a CSV file that contains the reviews downloaded for apps
-
-    Args:
-        target_file: str - name of the file where reviews are to be saved. If the file already exists, the ids of
-        existing reviews are returned
-
-    """
-
-    newfile = False if target_file.exists() else True
-
-    existing_review_ids = list()
-    if newfile:
-        with open(target_file, "at+", newline="") as csv_file:
-            csv_writer = csv.DictWriter(csv_file, fieldnames=FIELD_NAMES)
-            csv_writer.writeheader()
-    else:
-        pd_col = pd.read_csv(target_file, usecols=["reviewId"])
-        existing_review_ids = pd_col["reviewId"].to_list()
-
-    return existing_review_ids
-
-
-# %%
-def _init_log_file(log_file: str, existing_get: bool) -> dict:
-    """
-    Helper function for `save_playstore_app_list_reviews` which initialises the log file and gets existing log information,
-    if it exists.
-
-    Args:
-        log_file: str - name of the log file
-        existing_get: bool - indicates whether to try and read data from an existing log file
-
-    Returns:
-        dict object:
-            `app_id`: [
-                "completed": bool,
-                "continuation_token": continuation_token object,
-                "latest_review_id": str,
-                "latest_review_time": datetime,
-                "downloaded": int
-            ]
-    """
-
-    with open(log_file, "ab+") as log_file_handle:
-        try:
-            log_file_handle.seek(0)
-            log_info = pickle.load(log_file_handle) if existing_get else dict()
-        except:
-            log_info = dict()
-
-    return log_info
-
-
-# %%
-def _process_review_grab(
-    app_id: str, review_fetch: list, existing_review_ids: list
-) -> tuple:
-    """
-    Helper function for `save_playstore_app_list_reviews` that processes a set of reviews by:
-    1. adding the app_id to each review
-    2. removing userName and userImage
-    3. removing existing reviews
-
-    Args:
-        app_id: str - the id of the that we're working with
-        review_fetch: list - the list of reviews to be processed
-        existing_review_ids: list - list of reviews that have already been downloaded to avoid duplication
-
-    Returns:
-        a list of processed reviews
-        a list of review ids that have been processed
-
-    """
-
-    for index, review in enumerate(review_fetch):
-        review["appId"] = app_id
-        review.pop("userName", None)
-        review.pop("userImage", None)
-        if review["reviewId"] not in existing_review_ids:
-            existing_review_ids.append(review["reviewId"])
-        else:
-            review_fetch.pop(index)
-        review = {key: review[key] for key in FIELD_NAMES}
-
-    return (review_fetch, existing_review_ids)
-
-
-# %%
-def _update_log_info(
-    app_id: str,
-    log_info: dict,
-    continuation_token: object,
-    review_fetch: list,
-    first_pass: bool = False,
-    completed: bool = False,
-) -> dict:
-    """
-    Helper function for `save_playstore_app_list_reviews` that updates the `log_info` dict using data from the other args
-
-    Args:
-        app_id: the id of the app who's log info we're updating
-        log_info: dict - a dict containing information about the status of the current app review get run. Schema is:
-            app_id: {
-                completed: bool,
-                continuation_token: continuation token object from google-play-store API function
-                latest_review_id: str - taken from the results of the API call
-                latest_review_time: datetime - taken from the results of the API call
-                downloaded: int - the number of reviews downloaded
-            }
-        continuation_token: object - returned by google-play-store API function
-        review_fetch: list - list of reviews fetched by google-play-store API function
-        first_pass: bool, default False - indicates whether this is the first time the function is being run, in which case it should
-        save slightly different data
-        completed: bool, default False - indicates whether all the reviews have been downloaded; like `first_pass`, this will affect
-        the data that's saved
-
-    Returns:
-        a dict, derived from `log_info`, which has been updated according to the arguments provided
-
-    """
-
-    if first_pass:
-        log_info.update(
-            {
-                app_id: {
-                    "completed": False,
-                    "continuation_token": continuation_token,
-                    "latest_review_id": review_fetch[0]["reviewId"],
-                    "latest_review_time": review_fetch[0]["at"],
-                    "downloaded": len(review_fetch),
-                }
-            }
-        )
-    else:
-        log_info[app_id]["continuation_token"] = continuation_token
-        log_info[app_id]["downloaded"] = log_info[app_id]["downloaded"] + len(
-            review_fetch
-        )
-
-    if completed:
-        log_info[app_id]["completed"] = True
-        log_info[app_id]["continuation_token"] = None
-
-    return log_info
-
-
-# %%
-def save_playstore_app_list_reviews(
-    app_id_list: list,
-    filename: str,
-    force_download: bool = False,
-    run_quietly: bool = False,
-) -> Iterator[dict]:
-
-    """
-    Saves and returns reviews for a given list of apps on the Play Store using their ids (e.g., as returned by
-    get_playstore_app_ids)
-
-    Args:
-        app_id_list: list, list of app ids for the PLay Store
-        filename: str, target file to save the returned reviews
-        force_download: bool, true will force download of reviews, even if they've already been downloaded
-        run_quietly: bool, true will mean that no status updates are provided
-
-    The function returns a list of dict objects, which it also saves on-the-fly in the target file. `username` and
-    `userimage` are removed from the reviews that are returned and saved for data privacy.
-
-    `filename` is also used as the basis of a logfile `[filename].log`. If the function fails during run-time, it
-    will resume where it left off, provided the same filename is given.
-
-    """
-
-    target_file = PROJECT_DIR / APP_IDS_PATH / filename
-    log_file = PROJECT_DIR / APP_IDS_PATH / (Path(target_file).stem + ".log")
-
-    # Initialise the target file and log file, retrieving data if they already exist
-    existing_review_ids = _init_target_file(target_file)
-    log_info = _init_log_file(log_file, bool(existing_review_ids))
-
-    for app_id in app_id_list:
-        # reset variables ahead of downloading an app's reviews
-        first_pass = True
-        keep_going = True
-        more_to_get = True
-        continuation_token = None
-        review_fetch = []
-        app_review_count = 0
-
-        # Is the app in the logfile? If so, is it completed?
-        if app_id in log_info:
-            if log_info[app_id]["completed"]:
-                keep_going = False
-            else:
-                continuation_token = log_info[app_id]["continuation_token"]
-                first_pass = False
-
-        while (more_to_get or first_pass) and (keep_going or force_download):
-            # get (up to 200) reviews for the app using the google-play-store API function, `get_playstore_app_reviews`
-            review_fetch, continuation_token = get_playstore_app_reviews(
-                target_app_id=app_id, continuation_token=continuation_token
-            )
-
-            if len(review_fetch) == 0:
-                break
-
-            # if we just grabbed a full 200 reviews, there are (probably) more to get, so set more_to_get to True
-            more_to_get = True if len(review_fetch) == 200 else False
-
-            # process and save what we've just downloaded:
-            review_fetch, existing_review_ids = _process_review_grab(
-                app_id, review_fetch, existing_review_ids
-            )
-            with open(target_file, "at", newline="") as csv_file:
-                csv_writer = csv.DictWriter(csv_file, fieldnames=FIELD_NAMES)
-                csv_writer.writerows(review_fetch)
-
-            # save a snapshot of where we are so we can resume later
-            log_info = _update_log_info(
-                app_id,
-                log_info,
-                continuation_token,
-                review_fetch,
-                first_pass=first_pass,
-            )
-            with open(log_file, "rb+") as log_file_handle:
-                pickle.dump(log_info, log_file_handle)
-
-            app_review_count += len(review_fetch)
-
-            if not run_quietly:
-                logging.info(
-                    f"Retrieved {app_review_count} new reviews for {app_id}; fetched {log_info[app_id]['downloaded']} in total"
-                )
-
-            first_pass = False
-
-        # if we've reached here and keep_going is true it's because we've downloaded all the results, so update logfile accordingly
-        if keep_going and len(review_fetch) > 0:
-            with open(log_file, "rb+") as log_file_handle:
-                log_info = _update_log_info(
-                    app_id, log_info, continuation_token, review_fetch, completed=True
-                )
-                pickle.dump(log_info, log_file_handle)
-
-        if not run_quietly:
-            logging.info(f"{app_id}: done")
-
-    return True
-
-
-# %%
-def load_app_reviews(filename: str, folder: str = APP_IDS_PATH) -> list:
-    """ """
-
-    review_list = list()
-    with open(folder / filename) as csv_reader:
-        reviews = csv.DictReader(csv_reader)
-        for review in reviews:
-            review_list.append(review)
-
-    return review_list
-
-
-# %% [markdown]
-# ## Putting it together
-# ### Retrieving and using app ids via a set of downloaded web pages
-
-# %%
-def retrieve_app_set(seed: str, base_name: str, **kwargs):
-    """
-    Carries out the steps to retrieve the details for a given set of apps and saves the relevant output files.
-
-    """
-
-    file_names = {
-        "ids": base_name + "_ids.csv",
-        "details": base_name + "_details.json",
-        "reviews": base_name + "_reviews.csv",
-    }
-
-    options = {"ids": True, "details": True, "reviews": True}
-    options.update(kwargs)
-
-    app_ids = parse_folder_for_app_ids(seed)
-
-    if options["ids"]:
-        save_app_ids(app_ids, seed, file_names["ids"])
-
-    if options["details"]:
-        save_app_details(get_playstore_app_details(app_ids), file_names["details"])
-
-    if options["reviews"]:
-        save_playstore_app_list_reviews(app_ids, file_names["reviews"])
-
-
-# %%
-app_sets = {
-    "education_apps": "play_store/education_apps",
-    "parenting_apps": "play_store/parenting_apps",
+{
+    "cells": [
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "# Extract app ids from web pages saved from Google Play store\n",
+                "The notebook below establishes and tests functions to achieve the following:\n",
+                "1. retrieve the ids of apps from the Play Store\n",
+                "2. save and load app ids so they can be saved, retrieved and used later\n",
+                "3. download details for an app/s using its/their app id/s\n",
+                "4. save and load app details so they can be saved, retrieved and used later\n",
+                "\n",
+                "In step 4, app details are saved on-the-fly, as they are retrieved. As this step can take some time for 100s of apps or for apps with 1,000s of reviews (or both), the process can timeout or fail unexpectedly. Saving app details as they are retrieved allows the step to be resumed part-way through as a log file is saved with details of progress for each app.\n",
+                "\n",
+                "Note that app ids, details and reviews are managed independently and may not be synchronised. A list of 100 app ids does not mean that those 100 apps have had their details and/or reviews saved too. It's also possible that some apps' details and/or reviews might have been saved, yet their ids are not saved in the app id list. Two functions update *from* the app ids (`update_all_app_details` and `update_all_app_reviews`), which use the app id list as their basis for what to fetch. However, no functions exist in any other direction - i.e., if there are more app details than app ids, there is no function to add the missing app ids to the id list.\n",
+                "\n",
+                "These functions are dependent on the [google_play_scraper](https://pypi.org/project/google-play-scraper/) library.",
+            ],
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": ["## Do imports and set file locations"],
+        },
+        {
+            "cell_type": "code",
+            "execution_count": 1,
+            "metadata": {"lines_to_next_cell": 2},
+            "outputs": [],
+            "source": [
+                "import re\n",
+                "import json\n",
+                "import pickle\n",
+                "import csv\n",
+                "import pandas as pd\n",
+                "from google_play_scraper import Sort, app, reviews\n",
+                "from tqdm import tqdm\n",
+                "from pathlib import Path\n",
+                "from mapping_parenting_tech import PROJECT_DIR, logging\n",
+                "from typing import Iterator\n",
+                "\n",
+                'APP_IDS_PATH = PROJECT_DIR / "outputs/data"\n',
+                'DATA_DIR = PROJECT_DIR / "outputs/data"\n',
+                'REVIEWS_DIR = DATA_DIR / "app_reviews"\n',
+                'LOG_FILE = DATA_DIR / "app_review_getting.log"\n',
+                'CONTINUATION_TOKENS_DATA = DATA_DIR / "app_review_continuation_tokens.pickle"\n',
+                "\n",
+                "# Field names being used in the CSV file\n",
+                "FIELD_NAMES = (\n",
+                '    "appId",\n',
+                '    "content",\n',
+                '    "score",\n',
+                '    "thumbsUpCount",\n',
+                '    "reviewCreatedVersion",\n',
+                '    "at",\n',
+                '    "replyContent",\n',
+                '    "repliedAt",\n',
+                '    "reviewId",\n',
+                ")",
+            ],
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "Lists of apps. Interesting apps have been given by AFS; extra apps have been crowd sourced from Nesta staff"
+            ],
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "INTERESTING_APPS = [\n",
+                '    "com.easypeasyapp.epappns",\n',
+                '    "com.lingumi.lingumiplay",\n',
+                '    "com.learnandgo.kaligo",\n',
+                '    "com.kamicoach",\n',
+                '    "com.storytoys.myveryhungrycaterpillar.free.android.googleplay",\n',
+                '    "uk.co.bbc.cbeebiesgoexplore",\n',
+                '    "tv.alphablocks.numberblocksworld",\n',
+                '    "com.acamar.bingwatchplaylearn",\n',
+                '    "uk.org.bestbeginnings.babybuddymobile",\n',
+                '    "com.mumsnet.talk",\n',
+                '    "com.mushuk.mushapp",\n',
+                '    "com.teampeanut.peanut",\n',
+                '    "com.flipsidegroup.nightfeed.paid",\n',
+                "]\n",
+                "\n",
+                "EXTRA_APPS = [\n",
+                '    "org.twisevictory.apps",\n',
+                '    "com.domustechnica.tww.sleep",\n',
+                '    "com.domustechnica.backtoyou",\n',
+                '    "twwaudioapp.qsd.com.twwaudio.v2",\n',
+                '    "com.tinybeans",\n',
+                '    "com.edokicademy.montessoriacademy",\n',
+                '    "uk.co.bbc.cbeebiesplaytimeisland",\n',
+                '    "uk.co.bbc.cbeebiesgoexplore",\n',
+                '    "uk.co.bbc.cbeebiesgetcreative",\n',
+                '    "air.uk.co.bbc.cbeebiesstorytime",\n',
+                '    "com.teachyourmonstertoread.tmapp",\n',
+                '    "abc_kids.alphabet.com",\n',
+                '    "com.duckduckmoosedesign.kindread",\n',
+                '    "com.teampeanut.peanut",\n',
+                '    "com.ovuline.pregnancy",\n',
+                '    "com.ovuline.parenting",\n',
+                '    "com.pgs.emmasdiary",\n',
+                '    "com.backthen.android",\n',
+                '    "uk.co.happity.happity",\n',
+                '    "uk.co.hoop.android",\n',
+                '    "com.nighp.babytracker_android",\n',
+                '    "com.amila.parenting",\n',
+                '    "uk.org.bestbeginnings.babybuddymobile",\n',
+                '    "com.rvappstudios.baby.games.piano.phone.kids",\n',
+                '    "com.educational.baby.games",\n',
+                '    "com.happytools.learning.kids.games",\n',
+                '    "org.msq.babygames",\n',
+                '    "com.thepositivebirthcompany.freyasurgetimer",\n',
+                '    "com.mathletics",\n',
+                '    "com.huckleberry_labs.app",\n',
+                '    "com.propagator.squeezy",\n',
+                '    "com.sitekit.eRedBook",\n',
+                "]",
+            ],
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "## Functions to retrieve and save app ids\n",
+                "### Retrieving app ids\n",
+                "`get_playstore_app_ids` takes a local (downloaded) HTML page from the Play Store, specified by `filename`, and extracts app ids from it. As the Play Store loads items dynamically on scrolling, it's necessary to scroll to the bottom of the page, use a DOM Inspector (provided within Firefox, Safari, Chrome) and copy and paste the HTML surrounding the list of app links. Typically, this is a `div` element of class `ZmHEEd`.\n",
+                "\n",
+                "`parse_folder_for_app_ids` takes a folder and looks for HTML files (as described above) and calls `get_playstore_app_ids` on each one. It returns a single consolidated list of app ids. In this way, the various Play Store pages for an area (e.g., Parenting: top paid, top free, trending, etc.) can be consolidated into a single list of apps.\n",
+                "\n",
+                "`app_snowball` takes an app id and uses it to find related apps by using the similar apps listed on each app's page (details). It then looks at the similar apps listed on those apps' pages and so on. The `depth` argument specifies how many iterations down the process should go; the default is 5, which takes ~6 minutes (each extra step will take expotentially longer).",
+            ],
+        },
+        {
+            "cell_type": "code",
+            "execution_count": 3,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "def get_playstore_app_ids(filename: str) -> list:\n",
+                '    """\n',
+                "    Looks inside 'inputs/data' int the project directory for a given HTML file (filename) and scans that file\n",
+                "    for links containing ids to Play Store apps.\n",
+                "\n",
+                "    Args:\n",
+                "        filepath: str - the file name of the HTML file you wish to get app ids from. Must be in\n",
+                "        <[project directory]/inputs/data/> and should include further path details if file is in a sub-folder\n",
+                "        e.g., `play_store/app_page.html`\n",
+                "\n",
+                "    Returns:\n",
+                "        List of app ids, each as a str\n",
+                '    """\n',
+                "\n",
+                "    # open the input file\n",
+                '    with open(PROJECT_DIR / filename, "rt") as infile:\n',
+                "        html = infile.read()\n",
+                "\n",
+                "    # setup the regular expression that looks for app ids in the links to apps on a category page\n",
+                "    # (e.g., https://play.google.com/store/apps/collection/cluster?clp=0g4hCh8KGXRvcHNlbGxpbmdfZnJlZV9QQVJFTlRJTkcQBxgD:S:ANO1ljI8w1M&gsr=CiTSDiEKHwoZdG9wc2VsbGluZ19mcmVlX1BBUkVOVElORxAHGAM%3D:S:ANO1ljK7gT4)\n",
+                "    # this is looking for a link ('href') to '/store/apps/details?id=' and it grabs the text after 'id'\n",
+                '    re_pattern = r"(?<=href=\\"\\/store\\/apps\\/details\\?id=)(.*?)(?=\\")"\n',
+                "\n",
+                "    # retrieve all RE matches - this will return duplicates\n",
+                "    link_targets = re.findall(re_pattern, html)\n",
+                "\n",
+                "    # convert list of links into a dict to remove duplicates, and back into a list\n",
+                "    app_ids = list(set(link_targets))\n",
+                "\n",
+                "    return app_ids",
+            ],
+        },
+        {
+            "cell_type": "code",
+            "execution_count": 4,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "def parse_folder_for_app_ids(folder: str) -> list:\n",
+                '    """\n',
+                "    Scans a folder for HTML files and extracts the app ids from those files, returning a unified, de-duplicated list of app ids.\n",
+                "\n",
+                "    Args:\n",
+                "        folder: str - the folder to be scanned. This should be located in 'inputs/data' in a Nesta cookiecutter project\n",
+                "\n",
+                "    Returns:\n",
+                "        A list object of Play Store app ids, each as a str\n",
+                "\n",
+                '    """\n',
+                "\n",
+                '    target_folder = PROJECT_DIR / "inputs/data" / folder\n',
+                "    app_id_list = list()\n",
+                "\n",
+                "    # iterate .html files in the given folder, pass them to get_playstore_app_ids and assign results by extending app_id_list\n",
+                "    app_id_list.extend(\n",
+                "        [\n",
+                "            get_playstore_app_ids(file_name)\n",
+                "            for file_name in target_folder.iterdir()\n",
+                '            if (file_name.is_file() and file_name.suffix == ".html")\n',
+                "        ]\n",
+                "    )\n",
+                "\n",
+                "    # flatten app_id_list (each file parsed will have returned a separate list)\n",
+                "    app_id_list = [item for sublist in app_id_list for item in sublist]\n",
+                "\n",
+                "    # use `set` to remove duplicates in the return\n",
+                "    return list(set(app_id_list))",
+            ],
+        },
+        {
+            "cell_type": "code",
+            "execution_count": 5,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "def app_snowball(seed_app_id: str, depth: int = 5, __current_depth: int = 1) -> list:\n",
+                '    """\n',
+                "    Retrieves ids of Play Store apps related to `seed_app_id` by calling itself recursively.\n",
+                "\n",
+                "    Args:\n",
+                "        seed_app_id: str - the app id of the app of interest\n",
+                "        depth: int, default = 5 - the depth of recursion. This will increase the number of apps interrogated (and\n",
+                "        therefore the time taken for the initial call to complete) exponentially\n",
+                "        __current_depth: used for recursion, should be left blank by user\n",
+                "\n",
+                "    Returns:\n",
+                "        a list of app ids\n",
+                '    """\n',
+                "\n",
+                '    app_details = app(seed_app_id, country="gb")\n',
+                "    similar_apps = app_details[\n",
+                '        "similarApps"\n',
+                "    ]  # if type(app_details) == type(list()) else list()\n",
+                "\n",
+                "    snowball = set([seed_app_id])\n",
+                "    try:\n",
+                "        snowball.update(similar_apps)\n",
+                "    except:\n",
+                '        logging.warning(f"{seed_app_id} had a problem. Maybe it has no related apps.")\n',
+                "\n",
+                "    if __current_depth < depth:\n",
+                "        for this_app in similar_apps:\n",
+                "            snowball.update(app_snowball(this_app, depth, (__current_depth + 1)))\n",
+                "\n",
+                "    return list(snowball)",
+            ],
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "### Saving and loading app ids\n",
+                "\n",
+                "`update_all_app_id_list` will update the list of app ids based on the list passed as an argument.\n",
+                "\n",
+                "`load_all_app_ids` returns a set of all of the app ids that are saved.\n",
+                "\n",
+                "`is_app_in_list` takes a list of app ids and returns a cognate list of boolean values; if the app id in position *n* in the argument list is saved, the returned list will be *True* at position *n*",
+            ],
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "def update_all_app_id_list(app_id_list: list, dry_run: bool = False) -> set:\n",
+                '    """\n',
+                "    Takes a list of apps and adds them to the existing app list, removing any duplicates.\n",
+                "\n",
+                "    Args:\n",
+                "        app_id_list: list of app ids for the Play Store\n",
+                "        dry_run: bool, default is False, if True doesn't save the list but does update in memoey\n",
+                "\n",
+                "    Returns:\n",
+                "        A set of all app ids, i.e., it contains the original app ids plus the new ones given, minus any duplicates\n",
+                "\n",
+                '    """\n',
+                "\n",
+                '    logging.info(f"Attempting to insert {len(app_id_list)} to app list")\n',
+                "\n",
+                '    app_id_df = pd.read_csv(DATA_DIR / "all_app_ids.csv", index_col=None, header=0)\n',
+                "    app_ids = app_id_df[app_id_df.columns[0]].to_list()\n",
+                "\n",
+                "    orig_length = len(app_ids)\n",
+                "    app_ids.extend(app_id_list)\n",
+                "\n",
+                '    logging.info(f"Added {len(set(app_ids)) - orig_length} new app ids")\n',
+                "\n",
+                "    if dry_run == False:\n",
+                '        app_id_df = pd.DataFrame(set(app_ids), columns=["appId"])\n',
+                '        app_id_df.to_csv(DATA_DIR / "all_app_ids.csv", index=False)\n',
+                '        logging.info(f"App id list saved successfully")\n',
+                "\n",
+                "    return set(app_ids)",
+            ],
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "def load_all_app_ids() -> set:\n",
+                '    """\n',
+                "    Loads the saved ids of all apps and returns them in a set:\n",
+                "\n",
+                "    Takes no arguments; returns a single set.\n",
+                '    """\n',
+                "\n",
+                '    app_ids_df = pd.read_csv(DATA_DIR / "all_app_ids.csv", index_col=None, header=0)\n',
+                "    return set(app_ids_df[app_ids_df.columns[0]].to_list())",
+            ],
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "def is_app_in_list(app_list: list) -> list:\n",
+                '    """\n',
+                "    Identifies app ids that have been saved.\n",
+                "\n",
+                "    Arguments\n",
+                "        app_list: list - a list of app ids to be checked\n",
+                "\n",
+                "    Returns:\n",
+                "        list of boolean values, reflecting whether the app id in the equivalent position in `app_list` is present.\n",
+                "\n",
+                "    For example:\n",
+                "        If we want to check three apps, we pass their ids to the function:\n",
+                '        check_apps = is_app_in_list(["app 1 id", "app 2 id", app 3 id"])\n',
+                "\n",
+                "        If only the id for app 3 is in the list, `check_apps` will return:\n",
+                "        [False, False, True]\n",
+                '    """\n',
+                "\n",
+                "    all_app_ids = load_all_app_ids()\n",
+                "    r_list = list()\n",
+                "\n",
+                "    for x in app_list:\n",
+                "        to_add = True if x in all_app_ids else False\n",
+                "        r_list.append(to_add)\n",
+                "\n",
+                "    return r_list",
+            ],
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "## Retrieving app details\n",
+                "These functions get details for a given list of apps, specified by their ids (as retrieved above) and save and load those details.\n",
+                "\n",
+                "`get_playstore_app_details` takes a list of app ids and returns the details for those apps as a list of `dict` objects. The schema for each `dict` can be seen on [https://pypi.org/project/google-play-scraper/](https://pypi.org/project/google-play-scraper/)\n",
+                "\n",
+                "`update_all_app_details` gets app details for any apps whose ids have been saved but details haven't. Thus, it's not necessary to specify which app details to save - it just needs to have its id saved (see above) and running this function will ensure that its details are downloaded.\n",
+                "\n",
+                "`load_app_details` loads the app details saved by `save_app_details`",
+            ],
+        },
+        {
+            "cell_type": "code",
+            "execution_count": 6,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "def get_playstore_app_details(app_id_list: list) -> dict:\n",
+                '    """\n',
+                "    Uses `google-play-scraper` (https://pypi.org/project/google-play-scraper/) to retrieve details about apps given in\n",
+                "    `app_id_list` and returns dict of app details\n",
+                "\n",
+                "    Args:\n",
+                "        app_id_list: list - a list of app ids from which details will be retrieved\n",
+                "\n",
+                "    Returns:\n",
+                "        A dict containing app details; the key for each dict item is the app id. Each dict includes:\n",
+                "        - title\n",
+                "        - description\n",
+                "        - summary\n",
+                "        for specifics of all data returned, see https://pypi.org/project/google-play-scraper/\n",
+                "\n",
+                '    """\n',
+                "\n",
+                "    all_app_details = dict()\n",
+                "    remove_apps = list()\n",
+                "\n",
+                "    for app_id in tqdm(\n",
+                "        app_id_list,\n",
+                '        desc="Retrieving app details",\n',
+                "    ):\n",
+                "        try:\n",
+                '            app_details = app(app_id, country="gb")\n',
+                "            all_app_details.update({app_id: app_details})\n",
+                "\n",
+                "        except Exception as e:  # needs modifying to capture specific errors\n",
+                '            logging.warning(f"Error on app id {app_id}: {e} {repr(e)}")\n',
+                "            remove_apps.append(app_id)\n",
+                "\n",
+                "    return all_app_details",
+            ],
+        },
+        {
+            "cell_type": "code",
+            "execution_count": 7,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "def update_all_app_details(force_all: bool = False) -> dict:\n",
+                '    """\n',
+                "    Updates the file containing app details, ensuring that all apps saved in all_app_ids.csv have corresponding details\n",
+                "    saved in all_app_details.json\n",
+                "\n",
+                "    Args:\n",
+                "        force_all: bool, default is False, if set to True, will download details for ALL apps\n",
+                "\n",
+                "    Returns:\n",
+                "        A dict containing details for **all** apps. The key for each dict item is the app id.\n",
+                "\n",
+                '    """\n',
+                "\n",
+                "    all_app_ids = load_all_app_ids()\n",
+                "    existing_app_details = load_all_app_details()\n",
+                "\n",
+                "    target_list = (\n",
+                "        all_app_ids\n",
+                "        if force_all\n",
+                "        else [x for x in all_app_ids if x not in existing_app_details.keys()]\n",
+                "    )\n",
+                "\n",
+                '    logging.info(f"There are {len(target_list)} apps whose details will be updated.")\n',
+                "\n",
+                "    existing_app_details.update(get_playstore_app_details(target_list))\n",
+                "\n",
+                '    with open(DATA_DIR / "all_app_details.json", "wt") as f:\n',
+                "        json.dump(existing_app_details, f, indent=2, default=str)\n",
+                "\n",
+                '    logging.info("Updated app details file.")\n',
+                "    return existing_app_details",
+            ],
+        },
+        {
+            "cell_type": "code",
+            "execution_count": 8,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "def load_all_app_details() -> dict:\n",
+                '    """\n',
+                "    Loads JSON file containing app details and returns a dict object.\n",
+                "\n",
+                "    Args:\n",
+                "        None\n",
+                "\n",
+                "    Returns:\n",
+                "        A dict of app details for **all** apps. The key for each item is the app id.\n",
+                "\n",
+                '    """\n',
+                "\n",
+                '    with open(DATA_DIR / "all_app_details.json") as f:\n',
+                "        details = json.load(f)\n",
+                "\n",
+                "    return details",
+            ],
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "## Download reviews for the apps in a given list of app ids\n",
+                "\n",
+                "These functions enable downloading of app reviews. Reviews are saved into separate files for each app in a CSV format. Although the reviews are saved separately, they can be downloaded in a batch, which, if interrupted, can be resumed later.\n",
+                "\n",
+                "`get_playstore_app_reviews` gets up to 200 reviews for a single app and returns them as a list of dicts (JSON)\n",
+                "\n",
+                "`save_playstore_app_list_reviews` retrievs reviews for a given list of apps and saves them on-the-fly to a CSV file. If this function is interrupted, it can be called again witht the same parameters to resume where it left off. This function uses several helper functions:\n",
+                "- `_init_target_file`: if the target CSV file doesn't exist, this function creates it and saves the CSV column headings\n",
+                "\n",
+                "- `_init_log_info`: initialises the log info that saves details about the progress of `save_playstore_app_list_reviews`. There are two parts to the log file: a human-readable (JSON) file that stores details about reviews downloaded for apps - each app that has had reviews downloaded will have an entry. A separate `pickle` file that contains the 'continuation token' required by the `google-play-scraper` API, should we wish to resume downloading reviews.\n",
+                "\n",
+                "- `_update_app_log_info`: updates the log info for the app whose reviews are being downloaded\n",
+                "\n",
+                "- `_process_review_grab`: parses the reviews as they are retrieved by `save_playstore_app_list_reviews`, removing fields containing personal data and removes any ids that have already been downloaded.\n",
+                "\n",
+                "- `_save_log_info`: updates the log file with details about the progress of `save_playstore_app_list_reviews`\n",
+                "\n",
+                "`load_all_app_reviews` retrieves the app reviews from their CSV files and concatenates them all into a single Pandas dataframe",
+            ],
+        },
+        {
+            "cell_type": "code",
+            "execution_count": 9,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "def get_playstore_app_reviews(\n",
+                "    target_app_id, how_many: int = 200, continuation_token: object = None\n",
+                ") -> (Iterator[dict], object):\n",
+                '    """\n',
+                "    Returns up to 200 reviews for a given app in the Google Play Store. If more reviews are available, 'continuation_token' is also returned, which can then\n",
+                "    be passed as a parameter to indicate where the function should resume.\n",
+                "\n",
+                "    Args:\n",
+                "        target_app_id: id of the app for which you want to download reviews\n",
+                "        how_many: number of reviews you wish to download in one grab; defaults to 200, which is the maximum option\n",
+                "        continuation_token: indicates that the function should continue fetching reviews from this point\n",
+                "\n",
+                "    Returns:\n",
+                "        1. a list of reviews, each as a dict (see below)\n",
+                "        2. continuation_token: object to pass back to this function to pick up where it left off\n",
+                "\n",
+                "    The reviews themselves are dicts in the following format:\n",
+                '        "userName": str,\n',
+                '        "userImage": str,\n',
+                '        "content": str,\n',
+                '        "score": int,\n',
+                '        "thumbsUpCount": int,\n',
+                '        "reviewCreatedVersion": str,\n',
+                '        "at": datetime.datetime,\n',
+                '        "replyContent": str,\n',
+                '        "repliedAt": datetime.datetime,\n',
+                '        "reviewId": str\n',
+                '    """\n',
+                "\n",
+                '    if target_app_id == "":\n',
+                '        logging.warning("No app id given")\n',
+                "        return False\n",
+                "\n",
+                "    if how_many > 200:\n",
+                "        how_many = 200\n",
+                "\n",
+                "    # NB: code is incomplete. `not_fetched` intended to allow code to loop until in case of a timeout error, but\n",
+                "    # need to consider other errors that could be raised and how to respond to them\n",
+                "    not_fetched = True\n",
+                "    while not_fetched:\n",
+                "        try:\n",
+                "            if continuation_token is None:\n",
+                "                fetch_reviews, continuation_token = reviews(\n",
+                "                    app_id=target_app_id,\n",
+                '                    lang="en",\n',
+                '                    country="gb",\n',
+                "                    sort=Sort.NEWEST,\n",
+                "                    count=how_many,\n",
+                "                )\n",
+                "            else:\n",
+                "                fetch_reviews, continuation_token = reviews(\n",
+                "                    app_id=target_app_id, continuation_token=continuation_token\n",
+                "                )\n",
+                "            not_fetched = False\n",
+                "        except KeyboardInterrupt as e:\n",
+                "            not_fetched = False\n",
+                "        except Exception as e:\n",
+                "            logging.warning(\n",
+                '                f"An error occured trying to fetch reviews for {target_app_id}: {repr(e)}"\n',
+                "            )\n",
+                "            not_fetched = False\n",
+                "\n",
+                "    return (fetch_reviews, continuation_token)",
+            ],
+        },
+        {
+            "cell_type": "code",
+            "execution_count": 10,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "def _init_log_info() -> dict:\n",
+                '    """\n',
+                "    Helper function for `save_playstore_app_list_reviews` which gets existing log information, if it exists,\n",
+                "    or initialises the file if being run for the first time. The human readable log file does not contain the\n",
+                "    'continuation token' required to resume downloading reviews for an app whose progress was interrupted. Thus,\n",
+                "    this function add the continuation token/s to the dict for any apps that need to be resumed.\n",
+                "\n",
+                "    Args:\n",
+                "        None\n",
+                "\n",
+                "    Returns:\n",
+                "        dict object:\n",
+                "            `app_id`: {\n",
+                '                "completed": bool,\n',
+                '                "latest_review_id": str,\n',
+                '                "latest_review_time": datetime,\n',
+                '                "downloaded": int,\n',
+                '                "continuation_token": continuation_token\n',
+                "            }(,{...})\n",
+                '    """\n',
+                "\n",
+                "    log_info = dict()\n",
+                "\n",
+                "    if LOG_FILE.exists():\n",
+                '        with open(LOG_FILE, "rt") as f:\n',
+                "            f.seek(0)\n",
+                "            log_info.update(json.load(f))\n",
+                "\n",
+                "    if CONTINUATION_TOKENS_DATA.exists():\n",
+                '        with open(CONTINUATION_TOKENS_DATA, "rb") as f:\n',
+                "            try:\n",
+                "                c_tokens = pickle.load(f)\n",
+                "                for app_id in [\n",
+                '                    k for k, v in log_info.items() if v["completed"] == False\n',
+                "                ]:\n",
+                '                    log_info[app_id].update({"continuation_token": c_tokens[app_id]})\n',
+                "            except:\n",
+                '                logging.warning(f"Expected to find continuation token/s but didn\'t.")\n',
+                "\n",
+                "    return log_info",
+            ],
+        },
+        {
+            "cell_type": "code",
+            "execution_count": 11,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "def _init_target_file(target_file: str) -> list:\n",
+                '    """\n',
+                "    Helper function for `save_playstore_app_list_reviews` that initialises the file where reviews are to be saved.\n",
+                "    The target file is a CSV file that contains the reviews downloaded for a single app\n",
+                "\n",
+                "    Args:\n",
+                "        target_file: str - name of the file where reviews are to be saved. If the file already exists, the ids of\n",
+                "        existing reviews are returned\n",
+                "\n",
+                '    """\n',
+                "\n",
+                "    newfile = False if target_file.exists() else True\n",
+                "\n",
+                "    existing_review_ids = list()\n",
+                "    if newfile:\n",
+                '        with open(target_file, "wt", newline="") as csv_file:\n',
+                "            csv_writer = csv.DictWriter(csv_file, fieldnames=FIELD_NAMES)\n",
+                "            csv_writer.writeheader()\n",
+                "    else:\n",
+                '        pd_col = pd.read_csv(target_file, usecols=["reviewId"])\n',
+                '        existing_review_ids = pd_col["reviewId"].to_list()\n',
+                "\n",
+                "    return existing_review_ids",
+            ],
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "def _update_app_log_info(\n",
+                "    review_fetch: list,\n",
+                "    total_downloads: int,\n",
+                "    first_pass: bool = False,\n",
+                "    continuation_token: object = None,\n",
+                "    completed: bool = False,\n",
+                ") -> dict:\n",
+                '    """\n',
+                "    Helper function for `save_playstore_app_list_reviews` that updates the `log_info` dict using data from the other args\n",
+                "\n",
+                "    Args:\n",
+                "        review_fetch: list - list of reviews fetched by google-play-store API function\n",
+                "        total_downloads: the total number of reviews downloaded for this app\n",
+                "        first_pass: bool, default False - indicates whether this is the first time the function is being run, in which\n",
+                "        case it should save slightly different data\n",
+                "        continuation_token: object - returned by google-play-store API function\n",
+                "        completed: bool, default False - indicates whether all the reviews have been downloaded; like `first_pass`, this\n",
+                "        affects the data that's saved\n",
+                "\n",
+                "    Returns:\n",
+                "        a dict, derived from `log_info`, which has been updated according to the arguments provided\n",
+                "\n",
+                '    """\n',
+                "\n",
+                "    # set default info\n",
+                "    app_log_info = {\n",
+                '        "completed": False,\n',
+                '        "downloaded": total_downloads,\n',
+                '        "continuation_token": continuation_token,\n',
+                "    }\n",
+                "\n",
+                "    if first_pass and len(review_fetch) > 0:\n",
+                "        app_log_info.update(\n",
+                "            {\n",
+                '                "latest_review_id": review_fetch[0]["reviewId"],\n',
+                '                "latest_review_time": review_fetch[0]["at"],\n',
+                "            }\n",
+                "        )\n",
+                "\n",
+                "    if completed:\n",
+                '        app_log_info.update({"completed": True})\n',
+                '        app_log_info.pop("continuation_token", None)\n',
+                "\n",
+                "    return app_log_info",
+            ],
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "def _process_review_grab(\n",
+                "    app_id: str,\n",
+                "    review_fetch: list,\n",
+                "    existing_review_ids: list,\n",
+                "    force_download: bool = False,\n",
+                ") -> tuple:\n",
+                '    """\n',
+                "    Helper function for `save_playstore_app_list_reviews` that processes a set of reviews by:\n",
+                "    1. adding the app_id to each review\n",
+                "    2. removing userName and userImage\n",
+                "    3. removing existing reviews\n",
+                "\n",
+                "    Args:\n",
+                "        app_id: str - the id of the that we're working with\n",
+                "        review_fetch: list - the list of reviews to be processed\n",
+                "        existing_review_ids: list - list of reviews that have already been downloaded to avoid duplication\n",
+                "        force_download: downloads all reviews, regardless of whether they exist in `existing_review_ids`\n",
+                "\n",
+                "    Returns:\n",
+                "        a dict of processed reviews\n",
+                "        a list of review ids that have been saved\n",
+                "\n",
+                '    """\n',
+                "\n",
+                "    processed_reviews = list()\n",
+                "    for review in review_fetch:\n",
+                '        if (review["reviewId"] not in existing_review_ids) or force_download:\n',
+                '            review.update({"appId": app_id})\n',
+                '            existing_review_ids.append(review["reviewId"])\n',
+                "            new_review = {key: review[key] for key in FIELD_NAMES}\n",
+                "            processed_reviews.append(new_review)\n",
+                "\n",
+                "    return (processed_reviews, existing_review_ids)",
+            ],
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "def _save_log_info(updated_log_info: dict):\n",
+                "\n",
+                "    c_tokens = dict()\n",
+                "\n",
+                "    # strip continuation tokens from the log info and, for incomplete downloads, save them separately\n",
+                "    for app_id in updated_log_info.keys():\n",
+                '        if "continuation_token" in updated_log_info[app_id].keys():\n',
+                '            c_token = updated_log_info[app_id].pop("continuation_token", None)\n',
+                '            if updated_log_info[app_id]["completed"] == False:\n',
+                "                c_tokens.update({app_id: c_token})\n",
+                "\n",
+                "    try:\n",
+                '        with open(LOG_FILE, "wt") as f:\n',
+                "            json.dump(updated_log_info, f, indent=2, default=str)\n",
+                "\n",
+                '        with open(CONTINUATION_TOKENS_DATA, "wb") as f:\n',
+                "            pickle.dump(c_tokens, f)\n",
+                "\n",
+                "    except:\n",
+                "        logging.warning(\n",
+                '            "Interrupted during writing log file. Check log file for corruption."\n',
+                "        )\n",
+                "\n",
+                "    # unclear whether this is necessary, but this adds back continuation tokens that were stripped above\n",
+                "    for k in c_tokens.keys():\n",
+                '        updated_log_info[k].update({"continuation_token": c_tokens[k]})',
+            ],
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "def save_playstore_app_list_reviews(\n",
+                "    app_id_list: list, force_download: bool = False, run_quietly: bool = False\n",
+                ") -> bool:\n",
+                "\n",
+                '    """\n',
+                "    Saves and returns reviews for a given list of apps on the Play Store using their ids (e.g., as returned by\n",
+                "    get_playstore_app_ids)\n",
+                "\n",
+                "    Args:\n",
+                "        app_id_list: list, list of app ids for the PLay Store\n",
+                "        force_download: bool, true will force download of reviews, even if they've already been downloaded\n",
+                "        run_quietly: bool, true will mean that no status updates are provided\n",
+                "\n",
+                "    The function returns True on completing successfully.\n",
+                "\n",
+                "    Downloaded reviews are saved on-the-fly in a separate file for each app; the file is named [app_id].csv.\n",
+                "    For data privacy, `username` and `userimage` are removed from the reviews that are returned and saved.\n",
+                "\n",
+                "    If the function fails during run-time, it will resume where it left off.\n",
+                "\n",
+                '    """\n',
+                "\n",
+                "    # Initialise log info, retrieving existing information\n",
+                "    log_info = _init_log_info()\n",
+                "\n",
+                "    for i, app_id in enumerate(app_id_list, start=1):\n",
+                '        target_file = REVIEWS_DIR / f"{app_id}.csv"\n',
+                "        existing_review_ids = _init_target_file(target_file)\n",
+                "\n",
+                "        logging.info(\n",
+                '            f"Starting to download reviews for {app_id} ({i} of {len(app_id_list)})"\n',
+                "        )\n",
+                "\n",
+                "        # reset variables ahead of downloading an app's reviews\n",
+                "        first_pass = True\n",
+                "        more_to_get = True\n",
+                "        continuation_token = None\n",
+                "        review_fetch = []\n",
+                "        app_review_count = len(existing_review_ids) if force_download == False else 0\n",
+                "\n",
+                "        # Is the app in the logfile?\n",
+                "        if app_id in log_info.keys():\n",
+                "            # if force_download is in effect, we should start at the beginning, otherwise pick up where we left off\n",
+                '            if log_info[app_id]["completed"] == False:\n',
+                "                continuation_token = (\n",
+                '                    log_info[app_id]["continuation_token"]\n',
+                "                    if not force_download\n",
+                "                    else None\n",
+                "                )\n",
+                "            first_pass = False\n",
+                "        else:\n",
+                "            # if not, set up a log entry for it\n",
+                '            log_info.update({app_id: {"completed": False}})\n',
+                "\n",
+                "        while first_pass or force_download or more_to_get:\n",
+                "            # get (up to 200) reviews for the app using the google-play-store API function, `get_playstore_app_reviews`\n",
+                "            review_fetch, continuation_token = get_playstore_app_reviews(\n",
+                "                target_app_id=app_id, continuation_token=continuation_token\n",
+                "            )\n",
+                "\n",
+                "            # process and save what we've just downloaded:\n",
+                "            processed_reviews, existing_review_ids = _process_review_grab(\n",
+                "                app_id, review_fetch, existing_review_ids, force_download\n",
+                "            )\n",
+                "\n",
+                "            # if we got zero reviews or all reviews fetched already exist, exit the loop\n",
+                "            if ((len(processed_reviews) == 0) and (force_download == False)) or (\n",
+                "                len(review_fetch) == 0\n",
+                "            ):\n",
+                "                break\n",
+                "\n",
+                "            app_review_count += len(processed_reviews)\n",
+                "\n",
+                "            # if we grabbed fewer than 200 reviews, there are (probably) no more to get, so set more_to_get to False, otherwise True\n",
+                "            more_to_get = True if len(processed_reviews) == 200 else False\n",
+                "\n",
+                '            with open(target_file, "at", newline="") as csv_file:\n',
+                "                csv_writer = csv.DictWriter(csv_file, fieldnames=FIELD_NAMES)\n",
+                "                csv_writer.writerows(processed_reviews)\n",
+                "\n",
+                "            # save a snapshot of where we are so we can resume later\n",
+                "            log_info[app_id].update(\n",
+                "                _update_app_log_info(\n",
+                "                    processed_reviews,\n",
+                "                    app_review_count,\n",
+                "                    first_pass=first_pass,\n",
+                "                    continuation_token=continuation_token,\n",
+                "                )\n",
+                "            )\n",
+                "            _save_log_info(log_info)\n",
+                "\n",
+                "            if not run_quietly and (app_review_count % 5000 == 0):\n",
+                "                logging.info(\n",
+                "                    f\"Retrieved {app_review_count} new reviews for {app_id}; fetched {log_info[app_id]['downloaded']} in total\"\n",
+                "                )\n",
+                "\n",
+                "            first_pass = False\n",
+                "\n",
+                "        # update logfile\n",
+                "        log_info[app_id].update(\n",
+                "            _update_app_log_info(processed_reviews, app_review_count, completed=True)\n",
+                "        )\n",
+                "        _save_log_info(log_info)\n",
+                "\n",
+                "        if not run_quietly:\n",
+                "            logging.info(\n",
+                '                f"Completed fetching reviews for {app_id}; {app_review_count} were downloaded in total"\n',
+                "            )\n",
+                "\n",
+                "    return True",
+            ],
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "def load_all_app_reviews() -> pd.DataFrame():\n",
+                '    """\n',
+                "    Loads all app reviews into a Pandas dataframe.\n",
+                "\n",
+                "    This may take some time for 1,000s of apps (e.g., ~2.5minutes for reviews of 3,500 apps)\n",
+                "\n",
+                "    Returns:\n",
+                "        Pandas dataframe containing all reviews for all apps - note, this can be quite large!\n",
+                '    """\n',
+                "\n",
+                "    all_reviews = pd.DataFrame()\n",
+                "    review_files = REVIEWS_DIR.iterdir()\n",
+                "    reviews_df_list = list()\n",
+                "\n",
+                '    logging.info("Loading files")\n',
+                "    for file in tqdm(review_files):\n",
+                "        reviews_df = pd.read_csv(file, header=0, index_col=None)\n",
+                "        reviews_df_list.append(reviews_df)\n",
+                "\n",
+                '    logging.info("Concatenating data")\n',
+                "    all_reviews = pd.concat(reviews_df_list, axis=0, ignore_index=True)\n",
+                "\n",
+                "    return all_reviews",
+            ],
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "def list_update_all_app_reviews() -> set():\n",
+                '    """\n',
+                "    Returns a set of apps whose ids are saved but not their reviews, plus apps whose review fetch is incomplete.\n",
+                "\n",
+                "    This function takes no arguments.\n",
+                "\n",
+                "    Returns a set of app ids, which can be passed straight to `save_playstore_app_list_reviews`\n",
+                '    """\n',
+                "\n",
+                "    t_df = load_all_app_reviews()\n",
+                "    reviewed_apps = set(t_df.appId.to_list())\n",
+                "    del t_df\n",
+                "\n",
+                "    all_apps = load_all_app_ids()\n",
+                "\n",
+                "    apps_to_get = [x for x in all_apps if x not in reviewed_apps]\n",
+                "\n",
+                "    log_details = _init_log_info()\n",
+                '    apps_to_get.extend(k for k, v in log_details.items() if v["completed"] == False)\n',
+                "\n",
+                "    return set(apps_to_get)",
+            ],
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "## Putting it together\n",
+                "### Retrieving and using app ids via a set of downloaded web pages",
+            ],
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                'app_ids = parse_folder_for_app_ids("play_store/kids_under_five")\n',
+                "update_all_app_id_list(app_ids)",
+            ],
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "# update app details in light of the new app ids we've retrieved\n",
+                "update_all_app_details()",
+            ],
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "# get the reviews just for the apps we've identified\n",
+                "save_playstore_app_list_reviews(app_ids)",
+            ],
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "Take a list of apps (here, `INTERESTING_APPS`), identify those that are new and then snowball from them"
+            ],
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "existing_app_list = load_all_app_ids()\n",
+                "apps_to_explore = [x for x in INTERESTING_APPS if x not in existing_app_list]\n",
+                "app_details_set = list()\n",
+                "for x in apps_to_explore:\n",
+                '    logging.info(f"Getting apps related to {x}")\n',
+                "    related_apps = app_snowball(x)\n",
+                "    app_details_set.extend(related_apps)",
+            ],
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "# save the ids of apps identified via the snowballing in the previous step\n",
+                "update_all_app_id_list(app_details_set)",
+            ],
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "Download the reviews for apps whose reviews have not yet been downloaded"
+            ],
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": [
+                "apps_to_do = list_update_all_app_reviews()\n",
+                'logging.info(f"Reviews for {len(apps_to_do)} apps\' reviews to be downloaded.")',
+            ],
+        },
+        {
+            "cell_type": "code",
+            "execution_count": null,
+            "metadata": {},
+            "outputs": [],
+            "source": ["save_playstore_app_list_reviews(apps_to_do)"],
+        },
+    ],
+    "metadata": {
+        "interpreter": {
+            "hash": "9d0629e00499ccf218c6720a848e8111287e8cbf09d1f93118d5865a19869c30"
+        },
+        "jupytext": {"cell_metadata_filter": "-all", "comment_magics": true},
+        "kernelspec": {
+            "display_name": "Python 3 (ipykernel)",
+            "language": "python",
+            "name": "python3",
+        },
+        "language_info": {
+            "codemirror_mode": {"name": "ipython", "version": 3},
+            "file_extension": ".py",
+            "mimetype": "text/x-python",
+            "name": "python",
+            "nbconvert_exporter": "python",
+            "pygments_lexer": "ipython3",
+            "version": "3.8.0",
+        },
+    },
+    "nbformat": 4,
+    "nbformat_minor": 4,
 }
-
-for apps, folder in app_sets.items():
-    retrieve_app_set(folder, apps, ids=False, details=False)
-
-# %%
-app_ids = parse_folder_for_app_ids("play_store/kids_under_five")
-save_app_ids(app_ids, "kids_under_five", "kids_under_five_ids.csv")
-
-# %%
-# _, app_ids = load_app_ids("kids_under_five_ids.csv")
-app_details = get_playstore_app_details(app_ids)
-
-# %%
-save_app_details(app_details, "kids_under_five_details.json")
-
-# %%
-save_playstore_app_list_reviews(app_ids, "kids_under_five_reviews.csv")
-
-# %% [markdown]
-# ### Retrieving and using app ids via apps related to a seed
-# Using `com.easypeasyapp.epappns` here
-
-# %%
-app_set = app_snowball("com.easypeasyapp.epappns", 5)
-logging.info(f"Retrieved {len(app_set)} unique apps")
-save_app_ids(app_set, "related_to_easypeasy", "related_to_easypeasy_ids.csv")
-save_app_details(
-    get_playstore_app_details(app_set), "related_to_easypeasy_details.json"
-)
-save_playstore_app_list_reviews(app_set, "related_to_easypeasy_reviews.csv")
