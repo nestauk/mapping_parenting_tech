@@ -7,18 +7,18 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.13.4
+#       jupytext_version: 1.13.6
 #   kernelspec:
-#     display_name: 'Python 3.8.0 64-bit (''mapping_parenting_tech'': conda)'
+#     display_name: 'Python 3.8.12 64-bit (''mapping_parenting_tech'': conda)'
 #     language: python
-#     name: python3
+#     name: python3812jvsc74a57bd09d0629e00499ccf218c6720a848e8111287e8cbf09d1f93118d5865a19869c30
 # ---
 
 # %% [markdown]
 # Code to analyse app ratings and reviews
 
 # %%
-from mapping_parenting_tech import PROJECT_DIR
+from mapping_parenting_tech import PROJECT_DIR, logging
 
 # from mapping_parenting_tech.utils.altair_save_utils import (
 #    google_chrome_driver_setup,
@@ -35,6 +35,8 @@ import math
 from tqdm import tqdm
 
 DATA_DIR = PROJECT_DIR / "outputs/data"
+REVIEWS_DIR = DATA_DIR / "app_reviews"
+INPUT_DIR = PROJECT_DIR / "inputs/data/play_store"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 # %%
@@ -54,63 +56,79 @@ apps_of_interest = [
     "com.flipsidegroup.nightfeed.paid",
 ]
 
-# %%
-load_reviews_list = [
-    "education_apps_reviews.csv",
-    "parenting_apps_reviews.csv",
-    "related_to_easypeasy_reviews.csv",
-    "kids_under_five_reviews.csv",
-]
-
-getter = []
-for r_file in tqdm(load_reviews_list):
-    print(f"Loading {r_file}")
-    load_df = pd.read_csv(DATA_DIR / r_file, index_col=None, header=0)
-    getter.append(load_df)
-    print(f"Loaded {len(load_df)} reviews.")
-
-print("Consolidating dataframe")
-app_reviews = pd.concat(getter, axis=0, ignore_index=True)
-
-print(f"Dropping duplicates (currently {len(app_reviews)} reviews")
-app_reviews.drop_duplicates(inplace=True)
-print(f"FINISHED. Loaded {len(app_reviews)} unique reviews.")
-# apps = app_reviews["appId"].unique().tolist()
 
 # %%
-focus_apps = pd.read_csv(DATA_DIR / "focus_apps_22-01-11.csv")
-focus_apps.drop("appId", axis=1, inplace=True)
-focus_apps.rename(columns={focus_apps.columns[0]: "appId"}, inplace=True)
-focus_apps_list = focus_apps["appId"].unique().tolist()
+def load_all_app_reviews() -> pd.DataFrame():
+    """
+    Loads all app reviews into a Pandas dataframe.
+
+    This may take some time for 1,000s of apps (e.g., ~2.5minutes for reviews of 3,500 apps)
+
+    Returns:
+        Pandas dataframe containing all reviews for all apps - note, this can be quite large!
+    """
+
+    all_reviews = pd.DataFrame()
+    review_files = REVIEWS_DIR.iterdir()
+    reviews_df_list = list()
+
+    logging.info("Loading files")
+    for file in tqdm(review_files):
+        reviews_df = pd.read_csv(file, header=0, index_col=None)
+        reviews_df_list.append(reviews_df)
+
+    logging.info("Concatenating data")
+    all_reviews = pd.concat(reviews_df_list, axis=0, ignore_index=True)
+
+    return all_reviews
+
+
+# %%
+app_reviews = load_all_app_reviews()
+
+# %%
+app_details = pd.read_json(DATA_DIR / "all_app_details.json", orient="index")
+app_details.reset_index(inplace=True)
+app_details.rename(columns={"index": "appId"}, inplace=True)
+
+# %%
+focus_apps_list = pd.read_csv(
+    INPUT_DIR / "relevant_app_ids.csv", header=0, names=["appId"]
+)
+focus_apps_list = focus_apps_list["appId"].tolist()
+
+# %%
+focus_apps_details = app_details[app_details["appId"].isin(focus_apps_list)]
 focus_app_reviews = app_reviews[app_reviews["appId"].isin(focus_apps_list)]
+
+# %%
+# delete the very large `app_reviews` dataframe
+del app_reviews
 
 # %%
 focus_app_reviews["rYear"] = pd.to_datetime(focus_app_reviews["at"]).dt.year
 focus_app_reviews["rMonth"] = pd.to_datetime(focus_app_reviews["at"]).dt.month
 
 # %%
-review_dates = pd.DataFrame(columns=["appId", "total_reviews"])
-min_date = datetime.now().year
-for app_id in focus_apps_list:
-    date_dict = dict()
-    start_year = datetime.now().year
-    total_reviews = 0
-    this_app_dates = (
-        focus_app_reviews[focus_app_reviews["appId"] == app_id]
-        .groupby(by=["rYear"])["reviewId"]
-        .count()
-    )
-    for i, v in this_app_dates.items():
-        date_dict.update({i: v})
-        start_year = i if (i < start_year) and (v > 0) else start_year
-        total_reviews += v
-    min_date = start_year if start_year < min_date else min_date
-    date_dict.update({"appId": app_id, "total_reviews": total_reviews})
-    growth_dict = {
-        f"{i}_growth": v / date_dict[start_year] for i, v in this_app_dates.items()
-    }
-    date_dict.update(growth_dict)
-    review_dates = review_dates.append(date_dict, ignore_index=True)
+# Create a new dataframe, `reviewDates` with the number of reviews for each app per year
+review_dates = focus_app_reviews.groupby(["appId", "rYear"])["appId"].count().unstack()
+total_reviews_by_app = focus_app_reviews.groupby(["appId"])["appId"].count()
+review_dates["total_reviews"] = total_reviews_by_app
+review_dates
+
+
+# %%
+def growth_2021(row):
+    if (row[2021] > 0) and (row[2020] > 0):
+        return row[2021] / row[2020]
+    elif row[2021] > 0:
+        return 1
+    else:
+        return 0
+
+
+review_dates["2021_growth"] = review_dates.apply(growth_2021, axis=1)
+review_dates.sample(5)
 
 # %%
 col_order = ["appId", "total_reviews"]
@@ -129,7 +147,7 @@ print(
 
 # %%
 review_dates = review_dates.merge(
-    focus_apps[["appId", "genre", "score", "minInstalls"]], on="appId"
+    focus_apps_details[["appId", "genre", "score", "minInstalls"]], on="appId"
 )
 
 # %%
@@ -143,10 +161,13 @@ df = pd.DataFrame(
 df
 
 # %%
+plot_df = df[df["score"] >= 4]
+
+# %%
 xscale = alt.Scale(type="log", base=10)
-yscale = alt.Scale(type="log", base=10)
+yscale = alt.Scale(domain=[0, 30])
 fig = (
-    alt.Chart(df, width=750, height=750)
+    alt.Chart(plot_df, width=650, height=650)
     .mark_circle(filled=True, size=50)
     .encode(
         alt.X("total_reviews", scale=xscale, title="Given* number of reviews"),
@@ -156,6 +177,7 @@ fig = (
             title="Growth of reviews (#reviews in 2021 / #reviews in app's first year",
         ),
         alt.Color("genre:N"),
+        # alt.Size("score:N"),
         tooltip=["appId", "genre", "minInstalls"],
     )
 ).interactive()
