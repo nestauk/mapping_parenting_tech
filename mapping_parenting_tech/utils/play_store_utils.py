@@ -562,6 +562,12 @@ def _process_review_grab(
 
 
 def _save_log_info(updated_log_info: dict):
+    """
+    Helper function for `save_playstore_app_list_reviews` that saves the log information for the function as
+    it progresses. `continuation_token` is stripped from the log_info dict and saved separately, but only for
+    apps whose reviews are not fully downloaded. `continuation_token`s are saved in a separate pickle file.
+
+    """
 
     c_tokens = dict()
 
@@ -727,7 +733,37 @@ def load_all_app_reviews() -> pd.DataFrame():
     return all_reviews
 
 
-def list_update_all_app_reviews() -> set():
+def load_some_app_reviews(app_ids: list) -> pd.DataFrame:
+    """
+    Load reviews for a given set of Play Store apps
+
+    Args:
+        app_ids: list - a list of app ids whose reviews will be loaded
+
+    Returns:
+        Pandas DataFrame
+
+    """
+
+    reviews_df_list = []
+    logging.info("Reading app reviews")
+    for app_id in tqdm(app_ids, position=0):
+        try:
+            review_df = pd.read_csv(REVIEWS_DATA / f"{app_id}.csv")
+        except FileNotFoundError:
+            logging.info(f"No reviews found for {app_id}")
+            review_df = []
+        reviews_df_list.append(review_df)
+
+    logging.info("Concatenating reviews")
+    reviews_df = pd.concat(reviews_df_list)
+    del reviews_df_list
+    logging.info("Reviews loaded")
+
+    return reviews_df
+
+
+def list_missing_app_reviews() -> set():
     """
     Returns a set of apps whose ids are saved but not their reviews, plus apps whose review fetch is incomplete.
 
