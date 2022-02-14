@@ -23,6 +23,7 @@ from mapping_parenting_tech import PROJECT_DIR, logging
 from pathlib import Path
 from tqdm import tqdm
 
+import tomotopy as tp
 import altair as alt
 import pandas as pd
 import numpy as np
@@ -32,9 +33,9 @@ OUTPUT_DATA = PROJECT_DIR / "outputs/data"
 REVIEWS_DATA = PROJECT_DIR / "outputs/data/app_reviews"
 
 # %%
-app_df = pd.read_csv(INPUT_DATA / "relevant_app_ids.csv")
-app_ids = app_df["app_id"].to_list()
-app_clusters = app_df["cluster"].unique().tolist()
+# Read in the ids of the relevant apps (as manually id'd by Nesta staff)
+app_info = pd.read_csv(INPUT_DATA / "relevant_app_ids.csv")
+app_clusters = app_info["cluster"].unique().tolist()
 
 
 # %%
@@ -50,11 +51,25 @@ def load_some_app_reviews(app_ids: list) -> pd.DataFrame:
 
     """
 
+    data_types = {
+        "app_id": str,
+        "content": str,
+        "score": int,
+        "thumbsUpCount": int,
+        "reviewCreatedVersion": str,
+        "replyContent": str,
+        "reviewId": str,
+    }
+
     reviews_df_list = []
     logging.info("Reading app reviews")
     for app_id in tqdm(app_ids, position=0):
         try:
-            review_df = pd.read_csv(REVIEWS_DATA / f"{app_id}.csv")
+            review_df = pd.read_csv(
+                REVIEWS_DATA / f"{app_id}.csv",
+                dtype=data_types,
+                parse_dates=["at", "repliedAt"],
+            )
         except FileNotFoundError:
             logging.info(f"No reviews for {app_id}")
             review_df = []
@@ -62,29 +77,52 @@ def load_some_app_reviews(app_ids: list) -> pd.DataFrame:
 
     logging.info("Concatenating reviews")
     reviews_df = pd.concat(reviews_df_list)
+
     del reviews_df_list
+
     logging.info("Reviews loaded")
+
     return reviews_df
 
 
 # %%
-app_reviews_df = load_some_app_reviews(app_ids)
-app_reviews_df.rename(columns={"appId": "app_id"}, inplace=True)
-app_reviews_df["at"] = pd.to_datetime(app_reviews_df["at"], format="%Y-%m-%d")
+# load the reviews for the relevant apps
+app_reviews = load_some_app_reviews(app_info["app_id"].to_list())
+
+# rename the appId column...
+app_reviews.rename(columns={"appId": "app_id"}, inplace=True)
+
+# add the cluster that each add is in to the review
+app_reviews = app_reviews.merge(app_info, left_on="app_id", right_on="app_id")
+
+# what have we got...?
+app_reviews.shape
 
 # %%
-target_reviews_df = app_reviews_df.loc[
-    (app_reviews_df["at"] >= "2021-02-01")
-    # & (app_reviews_df["score"] == 5)
+# get a subset of reviews - here it's those written in the last year about apps in the
+# cluster 'Numeracy development'
+target_reviews = app_reviews.loc[
+    (app_reviews["at"] >= "2021-02-01")
+    # & (app_reviews["cluster"] == "Numeracy development")
 ]
-app_review_counts = target_reviews_df.groupby("app_id").agg(
+target_reviews.shape
+
+# %%
+# if we want to visualise the distribution of the reviews, group the apps by their id and cluster
+# and count the number of reviews
+
+app_review_counts = target_reviews.groupby(["app_id", "cluster"]).agg(
     review_count=("reviewId", "count"),
 )
-app_df = app_df.merge(app_review_counts, left_on="app_id", right_index=True)
+
+# reset the index so we just have one
+app_review_counts.reset_index(inplace=True)
 
 # %%
+# plot the data
+
 stripplot = (
-    alt.Chart(app_df, width=75)
+    alt.Chart(app_review_counts, width=75)
     .mark_circle(size=20)
     .encode(
         x=alt.X(
@@ -122,65 +160,118 @@ stripplot
 
 
 # %%
-app_df.groupby("cluster").agg(
+# Now let's look at the distributions of reviews for each cluster
+
+app_review_counts.groupby("cluster").agg(
     total_reviews=("review_count", "sum"),
     mean=("review_count", "mean"),
     median=("review_count", np.median),
 ).sort_values("total_reviews")
 
-# %%
-import tomotopy as tp
+# %% [markdown]
+# ## Topic modelling
 
 # %%
-raw_reviews = target_reviews_df["content"].to_list()
-clean_reviews = tpu.get_preprocessed_documents([str(review) for review in raw_reviews])
+# get a subset of reviews
+
+tp_reviews = target_reviews[target_reviews.cluster == "Drawing and colouring"]
+tp_reviews.shape
 
 # %%
-target_reviews_df["cleaned_reviews"] = clean_reviews
-target_reviews_df.to_csv(OUTPUT_DATA / "clean_app_reviews.csv")
+# get a preprocess the review text ready for topic modelling
+# this will take some time for 10,000s of reviews...
 
-# %%
-# load reviews into a dict: {cluster: [review_1, review_2 ... review_n]
-raw_reviews_by_cluster = dict()
-for cluster in tqdm(app_clusters):
-    raw_reviews_by_cluster[cluster] = target_reviews_df[
-        target_reviews_df["app_id"].isin(app_df[app_df["cluster"] == cluster].app_id)
-    ].content.to_list()
-
-# %%
-len(raw_reviews_by_cluster["Literacy - English / ABCs"])
-
-# %%
-# pre-process reviews
-clean_reviews_by_cluster = dict()
-# for reviews in tqdm(raw_reviews_by_cluster.items()):
-#    print(f"Processing {len(reviews)} in {cluster}")
-#    clean_reviews_by_cluster[cluster] = tpu.get_preprocessed_documents([str(review) for review in reviews])
-
-clean_reviews_by_cluster["Literacy - English / ABCs"] = tpu.get_preprocessed_documents(
-    [str(review) for review in raw_reviews_by_cluster["Literacy - English / ABCs"]]
+tp_reviews.loc[:, "preprocessed_review"] = tpu.get_preprocessed_documents(
+    [str(review) for review in tp_reviews["content"].to_list()]
 )
 
 # %%
+# get reviews that have 5 tokens or more
+
+tp_reviews = tp_reviews[tp_reviews.preprocessed_review.str.count(" ") + 1 > 4]
+tp_reviews.shape
+
+# %%
+# save processed reviews
+
+tp_reviews.to_csv(OUTPUT_DATA / "pre_processed_drawing_app_reviews.csv")
+
+# %%
+# load reviews into a dict: {cluster: [review_1, review_2 ... review_n]
+
+raw_reviews_by_cluster = dict()
+for cluster in tqdm(app_clusters):
+    raw_reviews_by_cluster[cluster] = tp_reviews[
+        tp_reviews.cluster == cluster
+    ].content.to_list()
+
+# %%
+# set up a Corpus which we'll load our documents (reviews) into
+
 corpus = tp.utils.Corpus()
 
 # %%
-for review in clean_reviews:
-    if len(review) > 0:
-        doc = tpu.simple_tokenizer(review)
-        if len(doc) > 0:
-            corpus.add_doc(doc)
+# tokenize the reviews and add to corpus
+
+for review in tp_reviews.preprocessed_review.to_list():
+    doc = tpu.simple_tokenizer(review)
+    corpus.add_doc(doc)
 
 # %%
-n_topics = 10
-n_iters = 1000
-model = tp.LDAModel(k=n_topics, corpus=corpus, seed=325)
+# initialise the model and confirm the number of documents in it
+
+model = tp.LDAModel(k=n_topics, corpus=corpus)
 
 print(len(model.docs))
 
+
 # %%
-for i in tqdm(range(0, n_iters, 10)):
-    model.train(iter=10)
+# Set up a function to help explore the variables we need to train the model - at what point does log likelihood and/or coherence converge?
+
+
+def test_model(
+    corpus,
+    n_topics: int = 20,
+    max_iters: int = 1000,
+    iter_step: int = 50,
+    seed: int = None,
+) -> int:
+
+    model = tp.LDAModel(k=n_topics, corpus=corpus)
+    model_scores = []
+
+    for i in range(0, max_iters, iter_step):
+        model.train(iter=iter_step)
+        ll_per_word = model.ll_per_word
+        c_v = tp.coherence.Coherence(model, coherence="c_v")
+        model_scores.append(
+            {
+                "N_TOPICS": n_topics,
+                "N_ITER": i,
+                "LOG_LIKELIHOOD": ll_per_word,
+                "COHERENCE": c_v.get_score(),
+                "SEED": seed,
+            }
+        )
+
+    model_scores = pd.DataFrame(model_scores)
+
+    return model_scores[model_scores["COHERENCE"] == model_scores["COHERENCE"].max()]
+
+
+# %%
+iters = []
+
+for j in tqdm(range(5, 25), position=0):
+    for i in range(100, 1500, 250):
+        iters.append(test_model(corpus, n_topics=j, max_iters=1050, seed=250))
+
+model_scores = pd.concat(iters)
+
+# %%
+# model_scores = model_scores.sort_values("COHERENCE", ascending=False)
+# model_scores.head()
+model_scores.plot.scatter("N_ITER", "LOG_LIKELIHOOD")
 
 # %%
 print(
@@ -217,32 +308,14 @@ for k in range(0, 5):
     print(f"+ Topic #{k}: {topic_sizes[k] / model.num_words:0.2f}%")
 
 # %%
-n_topic_range = range(1, 25)
-
-perplexity_scores = []
-for k in tqdm(n_topic_range):
-    _model = tp.LDAModel(k=k, corpus=corpus, seed=357)
-    _model.train(iter=n_iters)
-    perplexity_scores.append({"N_TOPICS": k, "PERPLEXITY_SCORE": _model.perplexity})
-
-# %%
-perplexity_scores = pd.DataFrame(perplexity_scores)
-perplexity_scores = perplexity_scores.sort_values("PERPLEXITY_SCORE")
-
-best_n_topic = perplexity_scores.nsmallest(1, "PERPLEXITY_SCORE")["N_TOPICS"].item()
-best_p = tp.LDAModel(k=best_n_topic, corpus=corpus, seed=357)
-best_p.train(iter=n_iters)
-
-# %%
-perplexity_scores.head(15)
-
-# %%
 print_topic_words(best_p)
 
 # %%
+n_topic_range = range(5, 35)
+n_iters = 1050
 coherence_scores = []
 for k in tqdm(n_topic_range):
-    _model = tp.LDAModel(k=k, corpus=corpus, seed=357)
+    _model = tp.LDAModel(k=k, corpus=corpus, seed=250)
     _model.train(iter=n_iters)
     coherence = tp.coherence.Coherence(_model, coherence="c_v")
     coherence_scores.append({"N_TOPICS": k, "COHERENCE_SCORE": coherence.get_score()})
@@ -251,12 +324,15 @@ for k in tqdm(n_topic_range):
 coherence_scores = pd.DataFrame(coherence_scores)
 coherence_scores = coherence_scores.sort_values("COHERENCE_SCORE", ascending=False)
 
-best_n_topic = coherence_scores.nlargest(1, "COHERENCE_SCORE")["N_TOPICS"].item()
-best_c = tp.LDAModel(k=best_n_topic, corpus=corpus, seed=357)
-best_c.train(iter=n_iters)
+# best_n_topic = coherence_scores.nlargest(1, "COHERENCE_SCORE")["N_TOPICS"].item()
+# best_c = tp.LDAModel(k=best_n_topic, corpus=corpus, seed=357)
+# best_c.train(iter=n_iters)
 
 # %%
 coherence_scores.head(15)
+
+# %%
+coherence_scores.plot.scatter("N_TOPICS", "COHERENCE_SCORE")
 
 # %%
 print_topic_words(best_c)
