@@ -22,11 +22,13 @@ from mapping_parenting_tech.utils import (
 from mapping_parenting_tech import PROJECT_DIR, logging
 from pathlib import Path
 from tqdm import tqdm
+from datetime import datetime
 
 import tomotopy as tp
 import altair as alt
 import pandas as pd
 import numpy as np
+import csv
 
 INPUT_DATA = PROJECT_DIR / "inputs/data/play_store"
 OUTPUT_DATA = PROJECT_DIR / "outputs/data"
@@ -376,5 +378,160 @@ r_len_df.describe()
 
 # %%
 app_reviews_df["content"].sample(25)
+
+# %%
+# load all of the preprocessed reviews
+
+data_types = {
+    "app_id": str,
+    "content": str,
+    "score": int,
+    "thumbsUpCount": int,
+    "reviewCreatedVersion": str,
+    "replyContent": str,
+    "reviewId": str,
+    "preprocessed_review": str,
+}
+
+fields = list(data_types.keys())
+fields.extend(["at", "repliedAt"])
+
+tp_reviews = pd.read_csv(
+    OUTPUT_DATA / "tpm/foo.csv",
+    usecols=fields,
+    dtype=data_types,
+    parse_dates=["at", "repliedAt"],
+)
+
+tp_reviews.shape
+
+# %%
+# ...and get those with 5 tokens or more
+tp_reviews = tp_reviews[tp_reviews.preprocessed_review.str.count(" ") + 1 > 4]
+
+tp_reviews.shape
+
+# %%
+# set up a Corpus which we'll load our documents (reviews) into
+
+corpus = tp.utils.Corpus()
+
+# %%
+# tokenize the reviews and add to corpus
+
+for review in tp_reviews.preprocessed_review.to_list():
+    doc = tpu.simple_tokenizer(review)
+    corpus.add_doc(doc)
+
+
+# %%
+# Set up a function to help explore the variables we need to train the model - at what point does log likelihood and/or coherence converge?
+
+
+def test_model(
+    corpus,
+    n_topics: int = 20,
+    max_iters: int = 1000,
+) -> int:
+
+    model = tp.LDAModel(k=n_topics, corpus=corpus, seed=250)
+
+    print("+ + Started training at ", datetime.now().time(), flush=True)
+
+    model.train(max_iters)
+
+    model_score = {
+        "N_TOPICS": n_topics,
+        "N_ITER": i,
+        "LOG_LIKELIHOOD": model.ll_per_word,
+        "COHERENCE": tp.coherence.Coherence(model, coherence="c_v").get_score(),
+    }
+
+    print("+ + Completed training at ", datetime.now().time(), flush=True)
+
+    return model_score
+
+
+# %%
+from_iters = 1250
+from_k = 31
+
+for i in range(from_iters, 2100, 250):
+    print(f"Testing {i} iterations", flush=True)
+    for j in range(5, 55):
+        if (i > from_iters) or ((i == from_iters) and (j > from_k)):
+            print(f"+ Testing {j} topics", flush=True)
+            model_score = test_model(
+                corpus,
+                n_topics=j,
+                max_iters=i,
+            )
+
+            with open(OUTPUT_DATA / "tpm/model_scores.csv", mode="a", newline="") as f:
+                csv_field_names = list(model_score.keys())
+                writer = csv.DictWriter(f, fieldnames=csv_field_names)
+                writer.writerow(model_score)
+
+# %%
+test_topics = [52]
+
+from_iters = 900
+from_k = 0
+
+for i in range(from_iters, 1250, 50):
+    print(f"Testing {i} iterations", flush=True)
+    for j in test_topics:
+        if (i > from_iters) or ((i == from_iters) and (j > from_k)):
+            print(f"+ Testing {j} topics", flush=True)
+            model_score = test_model(
+                corpus,
+                n_topics=j,
+                max_iters=i,
+            )
+
+            with open(OUTPUT_DATA / "tpm/model_scores.csv", mode="a", newline="") as f:
+                csv_field_names = list(model_score.keys())
+                writer = csv.DictWriter(f, fieldnames=csv_field_names)
+                writer.writerow(model_score)
+
+# %%
+model_scores = pd.read_csv(OUTPUT_DATA / "tpm/model_scores.csv")
+
+best_score = model_scores[model_scores["COHERENCE"] == model_scores["COHERENCE"].max()]
+
+n_topics = int(best_score["N_TOPICS"])
+n_iter = int(best_score["N_ITER"])
+
+# %%
+model_scores.plot.scatter("N_ITER", "COHERENCE")
+
+# %%
+model_scores.plot.scatter("N_TOPICS", "COHERENCE")
+
+# %%
+print(f"Optimum number of topics: {n_topics}")
+print(f"Optimum number of training iterations: {n_iter}")
+
+# %%
+final_model = tp.LDAModel(k=n_topics, corpus=corpus, seed=250)
+
+for i in tqdm(range(0, n_iter, 10)):
+    final_model.train(10)
+
+# %%
+print(tp.coherence.Coherence(final_model, coherence="c_v").get_score())
+
+# %%
+from mapping_parenting_tech.utils import lda_modelling_utils as lmu
+
+# %%
+MODEL_NAME = "play_store_reviews"
+
+lmu.save_lda_model_data(
+    MODEL_NAME,
+    OUTPUT_DATA / "tpm",
+    final_model,
+    list(tp_reviews["reviewId"]),
+)
 
 # %%
