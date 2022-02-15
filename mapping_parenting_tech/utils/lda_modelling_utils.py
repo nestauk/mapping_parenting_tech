@@ -3,8 +3,8 @@ innovation_sweet_spots.analysis.lda_modelling_utils
 
 Module for analysing LDA topic modelling results and querying documents using a model
 """
-from innovation_sweet_spots import PROJECT_DIR, logging
-from innovation_sweet_spots.utils.io import (
+from mapping_parenting_tech import PROJECT_DIR, logging
+from mapping_parenting_tech.utils.io import (
     save_text_items,
     read_text_items,
 )
