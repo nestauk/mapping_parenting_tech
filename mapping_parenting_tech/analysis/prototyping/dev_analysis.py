@@ -27,6 +27,7 @@ import json
 from mapping_parenting_tech import PROJECT_DIR, logging
 from pathlib import Path
 
+INPUT_PATH = PROJECT_DIR / "inputs/data/play_store"
 DATA_PATH = PROJECT_DIR / "outputs/data"
 
 # %% [markdown]
@@ -35,17 +36,32 @@ DATA_PATH = PROJECT_DIR / "outputs/data"
 # %%
 app_data = pd.read_json(DATA_PATH / "all_app_details.json", orient="index")
 app_data.reset_index(inplace=True)
-app_data.rename(columns={"index": "appId"}, inplace=True)
+app_data.rename(columns={"index": "app_id"}, inplace=True)
 
 # %%
-dev_groups = app_data.groupby(["developer"])
+relevant_apps = pd.read_csv(INPUT_PATH / "relevant_app_ids.csv")
+relevant_apps.rename(columns={"appId": "app_id"}, inplace=True)
+
+# %%
+relevant_app_details = app_data[app_data.app_id.isin(relevant_apps.app_id)]
+relevant_app_details = relevant_app_details.merge(
+    relevant_apps, left_on="app_id", right_on="app_id"
+)
+
+# %%
+relevant_apps.cluster.unique().tolist()
+
+# %%
+target_data = relevant_app_details[
+    relevant_app_details.cluster == "Numeracy development"
+]
+
+# %%
+dev_groups = target_data.groupby(["developer"])
 
 # %%
 dev_counts = dev_groups["developer"].count()
-dev_counts[dev_counts >= 11].sort_values(ascending=False)
-
-# %%
-dev_counts[dev_counts["appId"] >= 20].appId.sum()
+dev_counts[dev_counts >= 3].sort_values(ascending=False)
 
 # %%
 dev_installs = dev_groups["minInstalls"].sum()
@@ -59,8 +75,3 @@ df_data = {
 }
 dev_df = pd.concat(df_data, axis=1)
 dev_df.sort_values("dev_installs", ascending=False).head(20)
-
-# %%
-app_data.columns
-
-# %%
