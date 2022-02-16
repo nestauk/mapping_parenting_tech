@@ -419,9 +419,48 @@ corpus = tp.utils.Corpus()
 # %%
 # tokenize the reviews and add to corpus
 
+i = 0
+j = 0
+empty_reviews = []
+
 for review in tp_reviews.preprocessed_review.to_list():
     doc = tpu.simple_tokenizer(review)
     corpus.add_doc(doc)
+    i += 1
+    if len(corpus) != i:
+        empty_reviews.append({"row": j, "reviewId": tp_reviews.iloc[j].reviewId})
+        i = len(corpus)
+    j += 1
+
+
+# %%
+duff = empty_reviews[4]
+print(duff["row"], duff["reviewId"])
+
+# %%
+rows_to_drop = [duff["row"] for duff in empty_reviews]
+rows_to_drop
+
+# %%
+foo = tp_reviews.drop(rows_to_drop)
+foo.shape
+
+# %%
+# tokenize the reviews and add to corpus
+
+i = 0
+j = 0
+empty_reviews = []
+
+for review in foo.preprocessed_review.to_list():
+    doc = tpu.simple_tokenizer(review)
+    corpus.add_doc(doc)
+    i += 1
+    if len(corpus) != i:
+        empty_reviews.append({"row": j, "reviewId": foo.iloc[j].reviewId})
+        i = len(corpus)
+    j += 1
+print(len(corpus))
 
 
 # %%
@@ -513,8 +552,15 @@ print(f"Optimum number of topics: {n_topics}")
 print(f"Optimum number of training iterations: {n_iter}")
 
 # %%
+n_topics = 52
+n_iter = 1100
+
 final_model = tp.LDAModel(k=n_topics, corpus=corpus, seed=250)
 
+# %%
+len(final_model.docs)
+
+# %%
 for i in tqdm(range(0, n_iter, 10)):
     final_model.train(10)
 
@@ -531,7 +577,7 @@ lmu.save_lda_model_data(
     MODEL_NAME,
     OUTPUT_DATA / "tpm",
     final_model,
-    list(tp_reviews["reviewId"]),
+    list(foo["reviewId"]),
 )
 
 # %%
