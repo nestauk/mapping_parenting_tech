@@ -41,7 +41,7 @@ len(appIds)
 
 # %%
 # test retrieving related apps to a depth of 3
-appIds = psu.app_snowball("com.babysparks.babysparks", 3)
+appIds = psu.app_snowball("uk.org.bestbeginnings.babybuddymobile", 3)
 len(appIds)
 
 # %% [markdown]
@@ -51,7 +51,7 @@ len(appIds)
 # %%
 # test saving new apps - dry run allows us to do this without updating the file itself
 # function returns complete list of new apps (i.e., not just those that have been added)
-new_appIds = psu.update_all_app_id_list(appIds, dry_run=True)
+new_appIds = psu.update_all_app_id_list(appIds, dry_run=False)
 new_appIds
 
 # %%
@@ -60,17 +60,14 @@ all_appIds = psu.load_all_app_ids()
 len(all_appIds)
 
 # %%
-# check if an app is in the list of all app ids
-app_list = [
-    "com.amboss.medical.knowledge",
-    "com.excelatlife.depression",
-    "au.com.sightwords.parrotfish.lite",
-    "com.kitefaster.whitenoise",
-    "com.apololo.brightest.flashlight",
-    "this.one.isnt",
-]
-compare_list = psu.is_app_in_list(app_list)
-compare_list  # should be [True, True, True, True, True, False]
+# check if an app is in the list of all app ids - here we're using the results of the snowball above
+compare_list = psu.is_app_in_list(appIds)
+
+# enumerate through compare_list to identify apps that aren't present
+print(f"{compare_list.count(False)} apps are not already saved")
+for i, present in enumerate(compare_list):
+    if not present:
+        print(appIds[i])
 
 # %% [markdown]
 # ## Working with app details

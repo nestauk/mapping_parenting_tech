@@ -178,7 +178,7 @@ def app_snowball(seed_app_id: str, depth: int = 5, __current_depth: int = 1) -> 
     """
 
     try:
-        app_details = app(seed_app_id, country="gb")
+        app_details = app(seed_app_id)
         similar_apps = app_details["similarApps"]
     except:
         logging.warning(f"{seed_app_id} could not be processed.")
@@ -197,7 +197,7 @@ def app_snowball(seed_app_id: str, depth: int = 5, __current_depth: int = 1) -> 
     return list(snowball)
 
 
-def update_all_app_id_list(app_id_list: list, dry_run: bool = False) -> set:
+def update_all_app_id_list(app_id_list: list, dry_run: bool = False) -> list:
     """
     Takes a list of apps and adds them to the existing app list, removing any duplicates.
 
@@ -212,31 +212,48 @@ def update_all_app_id_list(app_id_list: list, dry_run: bool = False) -> set:
 
     logging.info(f"Attempting to insert {len(app_id_list)} apps to app list")
 
-    app_id_df = pd.read_csv(DATA_DIR / "all_app_ids.csv", index_col=None, header=0)
-    app_ids = app_id_df[app_id_df.columns[0]].to_list()
+    app_id_file_name = DATA_DIR / "all_app_ids.csv"
+
+    if app_id_file_name.exists():
+        app_id_df = pd.read_csv(app_id_file_name, index_col=None, header=0)
+        app_ids = app_id_df[app_id_df.columns[0]].to_list()
+    else:
+        pd.DataFrame([], columns=["appId"]).to_csv(
+            app_id_file_name, header=True, index=0
+        )
+        app_ids = []
 
     orig_length = len(app_ids)
     app_ids.extend(app_id_list)
 
-    logging.info(f"Added {len(set(app_ids)) - orig_length} new app ids")
+    app_ids = list(set(app_ids))
+
+    logging.info(f"Added {len(app_ids) - orig_length} new app ids")
 
     if dry_run == False:
-        app_id_df = pd.DataFrame(set(app_ids), columns=["appId"])
+        app_id_df = pd.DataFrame(app_ids, columns=["appId"])
         app_id_df.to_csv(DATA_DIR / "all_app_ids.csv", index=False)
         logging.info(f"App id list saved successfully")
 
-    return set(app_ids)
+    return app_ids
 
 
-def load_all_app_ids() -> set:
+def load_all_app_ids() -> list:
     """
     Loads the saved ids of all apps and returns them in a set:
 
     Takes no arguments; returns a single set.
     """
 
-    app_ids_df = pd.read_csv(DATA_DIR / "all_app_ids.csv", index_col=None, header=0)
-    return set(app_ids_df[app_ids_df.columns[0]].to_list())
+    app_id_file_name = DATA_DIR / "all_app_ids.csv"
+
+    app_ids_df = (
+        pd.read_csv(DATA_DIR / "all_app_ids.csv", index_col=None, header=0)
+        if app_id_file_name.exists()
+        else pd.DataFrame([], columns=["appId"])
+    )
+
+    return app_ids_df[app_ids_df.columns[0]].to_list()
 
 
 def is_app_in_list(app_list: list) -> list:
@@ -292,7 +309,7 @@ def get_playstore_app_details(app_id_list: list) -> dict:
         desc="Retrieving app details",
     ):
         try:
-            app_details = app(app_id, country="gb")
+            app_details = app(app_id)
             all_app_details.update({app_id: app_details})
 
         except Exception as e:  # needs modifying to capture specific errors
@@ -347,7 +364,7 @@ def load_all_app_details() -> dict:
 
     """
 
-    with open(DATA_DIR / "all_app_details.json") as f:
+    with open(DATA_DIR / "all_app_details.json", "rt") as f:
         details = json.load(f)
 
     return details
@@ -399,7 +416,6 @@ def get_playstore_app_reviews(
                 fetch_reviews, continuation_token = reviews(
                     app_id=target_app_id,
                     lang="en",
-                    country="gb",
                     sort=Sort.NEWEST,
                     count=how_many,
                 )
@@ -809,7 +825,7 @@ def load_some_app_reviews(app_ids: list) -> pd.DataFrame:
     return reviews_df
 
 
-def list_missing_app_reviews() -> set():
+def list_missing_app_reviews() -> list:
     """
     Returns a set of apps whose ids are saved but not their reviews, plus apps whose review fetch is incomplete.
 
@@ -829,4 +845,4 @@ def list_missing_app_reviews() -> set():
     log_details = _init_log_info()
     apps_to_get.extend(k for k, v in log_details.items() if v["completed"] == False)
 
-    return set(apps_to_get)
+    return list(set(apps_to_get))
