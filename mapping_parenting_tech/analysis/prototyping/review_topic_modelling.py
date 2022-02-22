@@ -412,12 +412,15 @@ tp_reviews = tp_reviews[tp_reviews.preprocessed_review.str.count(" ") + 1 > 4]
 tp_reviews.shape
 
 # %%
+tp_reviews["at"].min()
+
+# %%
 # set up a Corpus which we'll load our documents (reviews) into
 
 corpus = tp.utils.Corpus()
 
 # %%
-# tokenize the reviews and add to corpus
+# tokenize the reviews and add to corpus, noting reviews that aren't added to the corpus
 
 i = 0
 j = 0
