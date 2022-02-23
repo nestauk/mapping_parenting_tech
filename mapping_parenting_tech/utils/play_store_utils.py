@@ -22,7 +22,7 @@ from google_play_scraper import Sort, app, reviews
 from tqdm import tqdm
 from pathlib import Path
 from mapping_parenting_tech import PROJECT_DIR, logging
-from typing import Iterator
+from typing import Iterator, Tuple
 
 APP_IDS_PATH = PROJECT_DIR / "outputs/data"
 DATA_DIR = PROJECT_DIR / "outputs/data"
@@ -43,7 +43,9 @@ FIELD_NAMES = (
     "reviewId",
 )
 
-# Lists of apps. Interesting apps have been given by AFS; extra apps have been crowd sourced from Nesta staff
+# Lists of apps.
+# Interesting apps have been given by AFS
+# Extra apps have been crowd sourced from Nesta staff
 INTERESTING_APPS = [
     "com.easypeasyapp.epappns",
     "com.lingumi.lingumiplay",
@@ -111,7 +113,7 @@ def get_playstore_app_ids_from_html(filename: str) -> list:
     """
 
     # open the input file
-    with open(PROJECT_DIR / filename, "rt") as infile:
+    with open(PROJECT_DIR / "inputs/data" / filename, "rt") as infile:
         html = infile.read()
 
     # setup the regular expression that looks for app ids in the links to apps on a category page
@@ -128,10 +130,10 @@ def get_playstore_app_ids_from_html(filename: str) -> list:
     return app_ids
 
 
-def parse_folder_for_app_ids(folder: str) -> list:
+def get_playstore_app_ids_from_folder(folder: str) -> list:
     """
-    Scans a folder for HTML files and extracts the app ids from those files, returning a unified, de-duplicated list
-    of app ids.
+    Scans a folder within `inputs/data` for HTML files and extracts the app ids from those files,
+    returning a unified, de-duplicated list of app ids.
 
     Args:
         folder: str - the folder to be scanned. This should be located in 'inputs/data' in a Nesta cookiecutter project
@@ -148,7 +150,7 @@ def parse_folder_for_app_ids(folder: str) -> list:
     # by extending app_id_list
     app_id_list.extend(
         [
-            get_playstore_app_ids(file_name)
+            get_playstore_app_ids_from_html(file_name)
             for file_name in target_folder.iterdir()
             if (file_name.is_file() and file_name.suffix == ".html")
         ]
@@ -175,8 +177,12 @@ def app_snowball(seed_app_id: str, depth: int = 5, __current_depth: int = 1) -> 
         a list of app ids
     """
 
-    app_details = app(seed_app_id, country="gb")
-    similar_apps = app_details["similarApps"]
+    try:
+        app_details = app(seed_app_id)
+        similar_apps = app_details["similarApps"]
+    except:
+        logging.warning(f"{seed_app_id} could not be processed.")
+        return False
 
     snowball = set([seed_app_id])
     try:
@@ -191,7 +197,7 @@ def app_snowball(seed_app_id: str, depth: int = 5, __current_depth: int = 1) -> 
     return list(snowball)
 
 
-def update_all_app_id_list(app_id_list: list, dry_run: bool = False) -> set:
+def update_all_app_id_list(app_id_list: list, dry_run: bool = False) -> list:
     """
     Takes a list of apps and adds them to the existing app list, removing any duplicates.
 
@@ -206,31 +212,48 @@ def update_all_app_id_list(app_id_list: list, dry_run: bool = False) -> set:
 
     logging.info(f"Attempting to insert {len(app_id_list)} apps to app list")
 
-    app_id_df = pd.read_csv(DATA_DIR / "all_app_ids.csv", index_col=None, header=0)
-    app_ids = app_id_df[app_id_df.columns[0]].to_list()
+    app_id_file_name = DATA_DIR / "all_app_ids.csv"
+
+    if app_id_file_name.exists():
+        app_id_df = pd.read_csv(app_id_file_name, index_col=None, header=0)
+        app_ids = app_id_df[app_id_df.columns[0]].to_list()
+    else:
+        pd.DataFrame([], columns=["appId"]).to_csv(
+            app_id_file_name, header=True, index=0
+        )
+        app_ids = []
 
     orig_length = len(app_ids)
     app_ids.extend(app_id_list)
 
-    logging.info(f"Added {len(set(app_ids)) - orig_length} new app ids")
+    app_ids = list(set(app_ids))
+
+    logging.info(f"Added {len(app_ids) - orig_length} new app ids")
 
     if dry_run == False:
-        app_id_df = pd.DataFrame(set(app_ids), columns=["appId"])
+        app_id_df = pd.DataFrame(app_ids, columns=["appId"])
         app_id_df.to_csv(DATA_DIR / "all_app_ids.csv", index=False)
         logging.info(f"App id list saved successfully")
 
-    return set(app_ids)
+    return app_ids
 
 
-def load_all_app_ids() -> set:
+def load_all_app_ids() -> list:
     """
     Loads the saved ids of all apps and returns them in a set:
 
     Takes no arguments; returns a single set.
     """
 
-    app_ids_df = pd.read_csv(DATA_DIR / "all_app_ids.csv", index_col=None, header=0)
-    return set(app_ids_df[app_ids_df.columns[0]].to_list())
+    app_id_file_name = DATA_DIR / "all_app_ids.csv"
+
+    app_ids_df = (
+        pd.read_csv(DATA_DIR / "all_app_ids.csv", index_col=None, header=0)
+        if app_id_file_name.exists()
+        else pd.DataFrame([], columns=["appId"])
+    )
+
+    return app_ids_df[app_ids_df.columns[0]].to_list()
 
 
 def is_app_in_list(app_list: list) -> list:
@@ -286,7 +309,7 @@ def get_playstore_app_details(app_id_list: list) -> dict:
         desc="Retrieving app details",
     ):
         try:
-            app_details = app(app_id, country="gb")
+            app_details = app(app_id)
             all_app_details.update({app_id: app_details})
 
         except Exception as e:  # needs modifying to capture specific errors
@@ -341,7 +364,7 @@ def load_all_app_details() -> dict:
 
     """
 
-    with open(DATA_DIR / "all_app_details.json") as f:
+    with open(DATA_DIR / "all_app_details.json", "rt") as f:
         details = json.load(f)
 
     return details
@@ -349,7 +372,7 @@ def load_all_app_details() -> dict:
 
 def get_playstore_app_reviews(
     target_app_id, how_many: int = 200, continuation_token: object = None
-) -> (Iterator[dict], object):
+) -> Tuple[Iterator[dict], object]:
     """
     Returns up to 200 reviews for a given app in the Google Play Store. If more reviews are available,
     'continuation_token' is also returned, which can then be passed as a parameter to indicate where the
@@ -393,7 +416,6 @@ def get_playstore_app_reviews(
                 fetch_reviews, continuation_token = reviews(
                     app_id=target_app_id,
                     lang="en",
-                    country="gb",
                     sort=Sort.NEWEST,
                     count=how_many,
                 )
@@ -562,6 +584,12 @@ def _process_review_grab(
 
 
 def _save_log_info(updated_log_info: dict):
+    """
+    Helper function for `save_playstore_app_list_reviews` that saves the log information for the function as
+    it progresses. `continuation_token` is stripped from the log_info dict and saved separately, but only for
+    apps whose reviews are not fully downloaded. `continuation_token`s are saved in a separate pickle file.
+
+    """
 
     c_tokens = dict()
 
@@ -715,19 +743,89 @@ def load_all_app_reviews() -> pd.DataFrame():
     all_reviews = pd.DataFrame()
     review_files = REVIEWS_DIR.iterdir()
     reviews_df_list = list()
+    data_types = {
+        "appId": str,
+        "content": str,
+        "score": int,
+        "thumbsUpCount": int,
+        "reviewCreatedVersion": str,
+        "replyContent": str,
+        "reviewId": str,
+    }
 
     logging.info("Loading files")
     for file in tqdm(review_files):
-        reviews_df = pd.read_csv(file, header=0, index_col=None)
-        reviews_df_list.append(reviews_df)
+        try:
+            reviews_df = pd.read_csv(
+                file,
+                header=0,
+                index_col=None,
+                dtype=data_types,
+                parse_dates=["at", "repliedAt"],
+            )
+            reviews_df_list.append(reviews_df)
+        except:
+            logging.warning(f"Error loading {file}")
 
     logging.info("Concatenating data")
     all_reviews = pd.concat(reviews_df_list, axis=0, ignore_index=True)
 
+    logging.info("All reviews loaded")
+
     return all_reviews
 
 
-def list_update_all_app_reviews() -> set():
+def load_some_app_reviews(app_ids: list) -> pd.DataFrame:
+    """
+    Load reviews for a given set of Play Store apps
+
+    Args:
+        app_ids: list - a list of app ids whose reviews will be loaded
+
+    Returns:
+        Pandas DataFrame
+
+    """
+
+    data_types = {
+        "appId": str,
+        "content": str,
+        "score": int,
+        "thumbsUpCount": int,
+        "reviewCreatedVersion": str,
+        "replyContent": str,
+        "reviewId": str,
+    }
+
+    reviews_df_list = []
+    logging.info("Reading app reviews")
+    for app_id in tqdm(app_ids, position=0):
+        try:
+            review_df = pd.read_csv(
+                REVIEWS_DIR / f"{app_id}.csv",
+                header=0,
+                index_col=None,
+                dtype=data_types,
+                parse_dates=["at", "repliedAt"],
+            )
+        except FileNotFoundError:
+            logging.info(f"No reviews found for {app_id}")
+            review_df = []
+        except:
+            logging.warning(f"Error loading {app_id}.csv")
+            review_df = []
+
+        reviews_df_list.append(review_df)
+
+    logging.info("Concatenating reviews")
+    reviews_df = pd.concat(reviews_df_list)
+    del reviews_df_list
+    logging.info("Reviews loaded")
+
+    return reviews_df
+
+
+def list_missing_app_reviews() -> list:
     """
     Returns a set of apps whose ids are saved but not their reviews, plus apps whose review fetch is incomplete.
 
@@ -747,4 +845,4 @@ def list_update_all_app_reviews() -> set():
     log_details = _init_log_info()
     apps_to_get.extend(k for k, v in log_details.items() if v["completed"] == False)
 
-    return set(apps_to_get)
+    return list(set(apps_to_get))
