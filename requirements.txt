@@ -9,3 +9,16 @@ filelock
 typer
 sh
 tomotopy
+sentence-transformers
+umap-learn
+hdbscan
+altair
+textacy
+spacy==3.2.1
+https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.2.0/en_core_web_sm-3.2.0.tar.gz
+gensim
+pandas-profiling
+altair-saver
+selenium
+webdriver-manager
+google-play-scraper
