@@ -11,19 +11,16 @@
 #   kernelspec:
 #     display_name: 'Python 3.8.12 64-bit (''mapping_parenting_tech'': conda)'
 #     language: python
-#     name: python3812jvsc74a57bd09d0629e00499ccf218c6720a848e8111287e8cbf09d1f93118d5865a19869c30
+#     name: python3
 # ---
 
 # %% [markdown]
-# Code to analyse app ratings and reviews
+# # Analyse app ratings and reviews
 
 # %%
 from mapping_parenting_tech import PROJECT_DIR, logging
+from mapping_parenting_tech.utils import play_store_utils as psu
 
-# from mapping_parenting_tech.utils.altair_save_utils import (
-#    google_chrome_driver_setup,
-#    save_altair,
-# )
 from datetime import datetime
 import pandas as pd
 import numpy as np
@@ -40,81 +37,40 @@ INPUT_DIR = PROJECT_DIR / "inputs/data/play_store"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 # %%
-apps_of_interest = [
-    "com.easypeasyapp.epappns",
-    "com.lingumi.lingumiplay",
-    "com.learnandgo.kaligo",
-    "com.kamicoach",
-    "com.storytoys.myveryhungrycaterpillar.free.android.googleplay",
-    "uk.co.bbc.cbeebiesgoexplore",
-    "tv.alphablocks.numberblocksworld",
-    "com.acamar.bingwatchplaylearn",
-    "uk.org.bestbeginnings.babybuddymobile",
-    "com.mumsnet.talk",
-    "com.mushuk.mushapp",
-    "com.teampeanut.peanut",
-    "com.flipsidegroup.nightfeed.paid",
-]
-
+focus_apps = pd.read_csv(INPUT_DIR / "relevant_app_ids.csv", header=0)
+focus_apps_list = focus_apps["appId"].tolist()
 
 # %%
-def load_all_app_reviews() -> pd.DataFrame():
-    """
-    Loads all app reviews into a Pandas dataframe.
-
-    This may take some time for 1,000s of apps (e.g., ~2.5minutes for reviews of 3,500 apps)
-
-    Returns:
-        Pandas dataframe containing all reviews for all apps - note, this can be quite large!
-    """
-
-    all_reviews = pd.DataFrame()
-    review_files = REVIEWS_DIR.iterdir()
-    reviews_df_list = list()
-
-    logging.info("Loading files")
-    for file in tqdm(review_files):
-        reviews_df = pd.read_csv(file, header=0, index_col=None)
-        reviews_df_list.append(reviews_df)
-
-    logging.info("Concatenating data")
-    all_reviews = pd.concat(reviews_df_list, axis=0, ignore_index=True)
-
-    return all_reviews
-
+app_reviews = psu.load_some_app_reviews(focus_apps_list)
 
 # %%
-app_reviews = load_all_app_reviews()
-
-# %%
-app_details = pd.read_json(DATA_DIR / "all_app_details.json", orient="index")
+# load app details
+app_details = pd.DataFrame(psu.load_all_app_details()).T
 app_details.reset_index(inplace=True)
 app_details.rename(columns={"index": "appId"}, inplace=True)
+app_details = app_details[app_details["appId"].isin(focus_apps_list)]
+app_details = app_details.merge(focus_apps, on="appId")
 
 # %%
-focus_apps_list = pd.read_csv(
-    INPUT_DIR / "relevant_app_ids.csv", header=0, names=["appId"]
+app_reviews["rYear"] = pd.to_datetime(app_reviews["at"]).dt.year
+app_reviews["rMonth"] = pd.to_datetime(app_reviews["at"]).dt.month
+
+# %% [markdown]
+# ## Look at reviews by date
+# Frequency of reviews etc.
+
+# %%
+app_details.shape
+
+# %%
+# C reate a new dataframe, `reviewDates`, with the number of reviews for each app per year
+review_dates = (
+    app_reviews.groupby(["appId", "rYear"])["appId"].count().unstack().reset_index()
 )
-focus_apps_list = focus_apps_list["appId"].tolist()
-
-# %%
-focus_apps_details = app_details[app_details["appId"].isin(focus_apps_list)]
-focus_app_reviews = app_reviews[app_reviews["appId"].isin(focus_apps_list)]
-
-# %%
-# delete the very large `app_reviews` dataframe
-del app_reviews
-
-# %%
-focus_app_reviews["rYear"] = pd.to_datetime(focus_app_reviews["at"]).dt.year
-focus_app_reviews["rMonth"] = pd.to_datetime(focus_app_reviews["at"]).dt.month
-
-# %%
-# Create a new dataframe, `reviewDates` with the number of reviews for each app per year
-review_dates = focus_app_reviews.groupby(["appId", "rYear"])["appId"].count().unstack()
-total_reviews_by_app = focus_app_reviews.groupby(["appId"])["appId"].count()
-review_dates["total_reviews"] = total_reviews_by_app
-review_dates
+app_total_reviews = app_reviews.groupby(["appId"])["appId"].count()
+review_dates["total_reviews"] = review_dates["appId"].map(app_total_reviews)
+review_dates = review_dates.merge(focus_apps, on=["appId"])
+review_dates.shape
 
 
 # %%
@@ -128,65 +84,44 @@ def growth_2021(row):
 
 
 review_dates["2021_growth"] = review_dates.apply(growth_2021, axis=1)
-review_dates.sample(5)
-
-# %%
-col_order = ["appId", "total_reviews"]
-col_order.extend([i for i in range(min_date, datetime.now().year + 1)])
-col_order.extend(f"{i}_growth" for i in range(min_date, datetime.now().year + 1))
-
-review_dates = review_dates[col_order]
-review_dates.sort_values(by="total_reviews", ascending=False, inplace=True)
-
-dropped_apps = review_dates[review_dates["total_reviews"] == 0]
-review_dates = review_dates[review_dates["total_reviews"] > 0]
-
-print(
-    f"Dropped {len(dropped_apps)} apps with zero reviews, leaving {len(review_dates)}"
-)
 
 # %%
 review_dates = review_dates.merge(
-    focus_apps_details[["appId", "genre", "score", "minInstalls"]], on="appId"
+    app_details[["appId", "genre", "score", "minInstalls"]], on="appId"
 )
 
 # %%
 df = pd.DataFrame(
-    columns=["appId", "total_reviews", "growth", "genre", "minInstalls", "score"],
+    columns=["appId", "total_reviews", "growth", "cluster", "minInstalls", "score"],
     data=review_dates[
-        ["appId", "total_reviews", "2021_growth", "genre", "minInstalls", "score"]
+        ["appId", "total_reviews", "2021_growth", "cluster", "minInstalls", "score"]
     ].values,
     index=review_dates.index,
 )
-df
 
 # %%
-plot_df = df[df["score"] >= 4]
+plot_df = df[(df["score"] >= 4) & (df["growth"] < 50)]
 
 # %%
-xscale = alt.Scale(type="log", base=10)
-yscale = alt.Scale(domain=[0, 30])
+xscale = alt.Scale(type="log")
+yscale = alt.Scale(base=10)
+
 fig = (
     alt.Chart(plot_df, width=650, height=650)
     .mark_circle(filled=True, size=50)
     .encode(
-        alt.X("total_reviews", scale=xscale, title="Given* number of reviews"),
-        alt.Y(
-            "growth",
-            scale=yscale,
-            title="Growth of reviews (#reviews in 2021 / #reviews in app's first year",
-        ),
-        alt.Color("genre:N"),
-        # alt.Size("score:N"),
-        tooltip=["appId", "genre", "minInstalls"],
+        alt.X("total_reviews", scale=xscale),
+        alt.Y("growth", scale=yscale),
+        color="cluster:N",
+        tooltip=["appId", "cluster", "minInstalls"],
     )
 ).interactive()
 
 fig
 
 # %%
-xscale = alt.Scale(base=10)
-yscale = alt.Scale(type="log", base=10)
+xscale = alt.Scale()
+yscale = alt.Scale(domain=[0, 85])
 fig2 = (
     alt.Chart(df, width=750, height=750)
     .mark_circle(filled=True, size=50)
@@ -197,56 +132,13 @@ fig2 = (
             scale=yscale,
             title="Growth of reviews (#reviews in 2021 / #reviews in app's first year",
         ),
-        alt.Color("genre:N"),
+        alt.Color("cluster:N"),
         # alt.Size("growth"),
-        tooltip=["appId", "genre", "minInstalls"],
+        tooltip=["appId", "cluster", "minInstalls"],
     )
 ).interactive()
 
 fig2
-
-
-# %%
-def check_app(needles: list(), haystack: str) -> dict:
-
-    app_id_list = pd.read_csv(DATA_DIR / haystack)
-    pd_needles = pd.Series(needles)
-
-    return pd_needles.isin(app_id_list[list(app_id_list.columns)[0]])
-
-
-check_app(["com.fiftythings.bradford"], "related_to_fiftythings_ids.csv")
-
-
-# %%
-def load_description_set(filename: str, file_path: Path = DATA_DIR) -> pd.DataFrame:
-    # Load in the descriptions
-
-    with open(file_path / filename, "rt") as all_data_handle:
-        all_data = json.load(all_data_handle)
-
-    all_data = {k: v for d in all_data for k, v in d.items()}
-    return pd.DataFrame(all_data).T
-
-
-# %%
-def load_descriptions(file_list: list) -> pd.DataFrame:
-
-    list_pd = [load_description_set(f) for f in file_list]
-    return_df = pd.concat(list_pd, axis=0, ignore_index=True)
-    return_df.drop_duplicates(subset=["appId"], inplace=True)
-    return return_df
-
-
-# %%
-f_list = [
-    "related_to_easypeasy_details.json",
-    "education_apps_details.json",
-    "kids_under_five_details.json",
-    "parenting_apps_details.json",
-]
-
-app_details = load_descriptions(f_list)
 
 # %%
 app_details["ratings"].replace([None], [0], inplace=True)
@@ -257,8 +149,8 @@ app_details["log_score"] = app_details["compound_score"].apply(math.log10)
 app_details.sort_values("compound_score", ascending=False, inplace=True)
 
 # %%
-xscale = alt.Scale(type="log", base=10)
-yscale = alt.Scale(base=10)
+xscale = alt.Scale(type="log")
+yscale = alt.Scale(type="pow")
 fig = (
     alt.Chart(app_details, width=500, height=500)
     .mark_circle(size=60)
@@ -273,10 +165,10 @@ fig = (
 fig
 
 # %%
-xscale = alt.Scale(base=10, zero=False)
-yscale = alt.Scale(base=10)
+xscale = alt.Scale(type="sqrt")
+yscale = alt.Scale(domain=[3, 5])
 fig = (
-    alt.Chart(app_details, width=500, height=500)
+    alt.Chart(app_details[app_details["score"] > 3], width=500, height=500)
     .mark_point(filled=True)
     .encode(
         alt.X("reviews", scale=xscale),
@@ -290,3 +182,130 @@ fig = (
 fig
 
 # %%
+app_details.columns
+
+# %%
+plotter = app_details[
+    [
+        "appId",
+        "cluster",
+        "minInstalls",
+        "score",
+        "ratings",
+        "reviews",
+        "price",
+        "free",
+        "containsAds",
+        "offersIAP",
+    ]
+]
+
+# %%
+plotter.sample(5)
+
+# %%
+plotter = (
+    plotter.groupby("cluster")
+    .agg(
+        cluster_size=("cluster", "count"),
+        free=("free", "sum"),
+        IAPs=("offersIAP", "sum"),
+        ads=("containsAds", "sum"),
+    )
+    .reset_index()
+)
+
+turn_to_pc = ["free", "ads", "IAPs"]
+for i in turn_to_pc:
+    plotter[f"{i}_pc"] = plotter[i] / plotter.cluster_size
+
+plotter
+
+# %%
+base = (
+    alt.Chart()
+    .mark_point()
+    .encode(color="cluster:N")
+    .properties(width=250, height=250)
+    .interactive()
+)
+
+# %%
+
+fig = (
+    alt.Chart(plotter)
+    .mark_bar()
+    .encode(
+        x=alt.X("cluster:N"),
+        y=alt.Y("IAPs_pc:Q", scale=alt.Scale(domain=[0, 1])),
+        color=alt.Color("cluster"),
+    )
+)
+
+fig
+
+# %%
+data_map = {
+    "free_pc": "Number of free apps",
+    "IAPs_pc": "Number of apps with in-app purchases",
+    "ads_pc": "Number of apps with ads",
+}
+
+# %%
+df = plotter.sort_values("free_pc", ascending=False)
+bar_width = round(1 / len(data_map), 2) - 0.1
+
+fig, ax = plt.subplots(figsize=(15, 10))
+plt.setp(
+    ax.get_xticklabels(), rotation=45, horizontalalignment="right", fontsize="medium"
+)
+plt.grid(visible=True, axis="y", which="major")
+ax.set_ylabel("Percentage of apps")
+
+x = np.arange(len(df.cluster))
+for i, (key, value) in enumerate(data_map.items()):
+    ax.bar(x + (i * bar_width), df[key], label=data_map[key], width=bar_width)
+
+ax.set_xticks(x + (len(data_map) * bar_width) / len(data_map))
+ax.set_xticklabels(df.cluster.unique())
+
+
+fig.legend(loc="upper right")
+
+# %%
+from scipy import stats
+
+app_costs = app_details[app_details.price > 0].price.to_list()
+print(
+    len(app_costs),
+    np.mean(app_costs),
+    np.median(app_costs),
+    stats.mode(app_costs)[0],
+    np.min(app_costs),
+    np.max(app_costs),
+)
+
+# %%
+app_details[app_details["price"] == 2.99]
+
+# %%
+price_distro = (
+    app_details.groupby("price")
+    .agg(
+        appId=("appId", "count"),
+    )
+    .reset_index()
+)
+price_distro.drop(price_distro.index[0], inplace=True)
+
+# %%
+fig = (
+    alt.Chart(price_distro, width=700, height=500)
+    .mark_circle(size=50)
+    .encode(x="price", y="appId")
+)
+fig
+
+# %%
+needle = "buddy"
+focus_apps[focus_apps["appId"].str.contains(needle, regex=False)]
