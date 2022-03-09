@@ -7,7 +7,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.13.6
+#       jupytext_version: 1.13.7
 #   kernelspec:
 #     display_name: 'Python 3.8.12 64-bit (''mapping_parenting_tech'': conda)'
 #     language: python
@@ -16,6 +16,7 @@
 
 # %%
 from mapping_parenting_tech.utils import lda_modelling_utils as lmu
+from mapping_parenting_tech.utils import play_store_utils as psu
 from mapping_parenting_tech import PROJECT_DIR, logging
 from tqdm import tqdm
 
@@ -110,7 +111,7 @@ relevant_apps = pd.read_csv(INPUT_DIR / "relevant_app_ids.csv")
 clusters = relevant_apps.cluster.unique().tolist()
 
 # Load the reviews for these apps
-relevant_reviews = load_some_app_reviews(relevant_apps.appId.to_list())
+relevant_reviews = psu.load_some_app_reviews(relevant_apps.appId.to_list())
 
 # %%
 relevant_reviews = relevant_reviews.merge(relevant_apps, on="appId")
@@ -276,7 +277,7 @@ def topic_sample(
 
 
 # %%
-sample_reviews = topic_sample(relevant_reviews, top_topic_docs, 31, 10)
+sample_reviews = topic_sample(relevant_reviews, top_topic_docs, 11, 10)
 
 for r in range(len(sample_reviews)):
     print(f"+ {sample_reviews.iloc[r, 0]}\n{sample_reviews.iloc[r, 1]}\n")
