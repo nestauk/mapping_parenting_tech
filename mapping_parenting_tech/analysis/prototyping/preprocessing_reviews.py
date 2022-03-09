@@ -4,7 +4,7 @@
 #   jupytext:
 #     cell_metadata_filter: -all
 #     comment_magics: true
-#     formats: ipynb,py
+#     formats: ipynb,py:light
 #     text_representation:
 #       extension: .py
 #       format_name: light
@@ -19,9 +19,7 @@
 # # Prototype multi grain topic modelling
 
 # +
-from mapping_parenting_tech import PROJECT_DIR, logging
-import tomotopy
-import pyLDAvis
+from mapping_parenting_tech import PROJECT_DIR
 import numpy as np
 import pandas as pd
 from pandas_profiling import ProfileReport
@@ -36,8 +34,6 @@ from spacy.tokens.doc import Doc
 from spacy.tokens.span import Span
 from toolz import pipe
 from gensim import models
-import itertools
-import pickle
 from gensim.models.phrases import FrozenPhrases
 
 nlp = spacy.load("en_core_web_sm")
