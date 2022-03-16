@@ -91,7 +91,8 @@ model_data.keys()
 lmu.print_model_info(mdl)
 
 # %%
-lmu.make_pyLDAvis(mdl, TPM_DIR / f"{MODEL_NAME}_pyLDAvis.html")
+# Run once or as required, but suggest keep commented by default
+# lmu.make_pyLDAvis(mdl, TPM_DIR / f"{MODEL_NAME}_pyLDAvis.html")
 
 # %%
 doc_topic_probabilities = lmu.get_document_topic_distributions(mdl)
@@ -196,6 +197,9 @@ for i in range(mdl.k):
 # The position of the document probability in `probabilities` aligns with the position of the review id in `ids`
 
 # %%
+relevant_reviews.columns
+
+# %%
 topic_probability_stats = dict()
 top_topic_docs = dict()
 
@@ -213,19 +217,22 @@ for i in tqdm(range(mdl.k)):
 
     topic_probability_stats[topic] = _stats
 
-    _probs = [p for p in foo if p > _stats["pc"]]
-    _ids = topic_probability_table[topic_probability_table[topic].isin(_probs)][
-        "id"
-    ].to_list()
-    _appIds = relevant_reviews[relevant_reviews["reviewId"].isin(_ids)][
-        "appId"
-    ].to_list()
+    _review_data = topic_probability_table[
+        topic_probability_table[topic] > _stats["pc"]
+    ][["id", topic]]
 
-    top_topic_docs[topic] = {
-        "probability": _probs,
-        "id": _ids,
-        "appId": _appIds,
-    }
+    _review_data = (
+        _review_data.merge(
+            relevant_reviews[["reviewId", "appId", "score"]],
+            how="left",
+            left_on="id",
+            right_on="reviewId",
+        )
+        .drop(columns=["reviewId"])
+        .rename(columns={topic: "probability"})
+    )
+
+    top_topic_docs[topic] = _review_data.to_dict(orient="list")
 
 # %%
 topic_scores = []
@@ -277,9 +284,47 @@ def topic_sample(
 
 
 # %%
-sample_reviews = topic_sample(relevant_reviews, top_topic_docs, 11, 10)
+sample_reviews = topic_sample(relevant_reviews, top_topic_docs, 50, 10)
 
 for r in range(len(sample_reviews)):
     print(f"+ {sample_reviews.iloc[r, 0]}\n{sample_reviews.iloc[r, 1]}\n")
 
 # %%
+needle = "cry"
+
+haystack = top_topic_docs["content"].str.contains(needle, False)
+
+targets = haystack[haystack == True].index.to_list()
+
+for r in top_topic_docs.iloc[targets][["appId", "content"]].sample(5).iterrows():
+    print(f"+ {r[1][0]}")
+    print(r[1][1], "\n")
+
+
+# %%
+topic_num = "50"
+target_score = 1
+
+review_scan = pd.DataFrame(top_topic_docs[f"topic_{topic_num}"])
+foo = review_scan[review_scan["score"] == target_score]
+
+# %%
+# visualise a sample of the topics
+sample_count = 10
+(
+    foo.sample(sample_count)
+    .merge(
+        relevant_reviews[["content", "reviewId"]],
+        left_on="id",
+        right_on="reviewId",
+        how="left",
+    )[["appId", "content"]]
+    .to_dict(orient="record")
+)
+
+# %%
+# show the best / worst apps that people are talking about
+foo.groupby("appId").count().sort_values(by="id", ascending=False).head(10)
+
+# %%
+review_scan.groupby("score").count()
