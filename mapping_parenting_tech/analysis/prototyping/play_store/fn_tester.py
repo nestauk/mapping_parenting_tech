@@ -7,7 +7,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.13.6
+#       jupytext_version: 1.13.7
 #   kernelspec:
 #     display_name: Python 3.8.0 ('mapping_parenting_tech')
 #     language: python
@@ -136,5 +136,5 @@ app_list = [
     "com.kitefaster.whitenoise",
     "com.apololo.brightest.flashlight",
 ]
-my_app_reviews = psu.load_some_app_reviews(app_list, ["content", "reviewId"])
+my_app_reviews = psu.load_some_app_reviews(app_list)
 my_app_reviews.shape
