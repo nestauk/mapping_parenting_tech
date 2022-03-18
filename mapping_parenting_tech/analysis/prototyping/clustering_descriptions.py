@@ -7,7 +7,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.13.6
+#       jupytext_version: 1.13.7
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
@@ -16,7 +16,18 @@
 
 # %% [markdown]
 # # Clustering of app descriptions
-# Takes descriptions of Play Store apps and clusters accordingly, producing a visualisation of the clusters.
+# Takes descriptions of Play Store apps and clusters then accordingly, plotting visualisation/s of the clusters produced.
+#
+# Process is to...
+# 1. embed the descriptions into high dimensional vectors using `SentenceTransformer`
+# 2. reduce dimentionality using `UMAP`
+# 3. cluster the reduced-dimension vectors using `hdbscan`
+# 4. further reduce dimentionality to 2D, such that results can be visualised
+# 5. use `sklean` to assign any apps that weren't clustered by `hdbscan`
+# 5. plot results of clustering
+#
+# Following the initial clustering, clusters have been given more meaningful names and grouped together according to whether they
+# are relevant, interesting, unlikely, or to be discarded. The results are saved to CSV for manual review (e.g. in Google Sheets)
 
 # %%
 from sentence_transformers import SentenceTransformer
@@ -43,7 +54,7 @@ model = SentenceTransformer("all-mpnet-base-v2")
 
 # %%
 # Load in the descriptions
-details = pd.read_json(INPUT_DATA / "all_app_details3.json", orient="index")
+details = pd.read_json(INPUT_DATA / "all_app_details.json", orient="index")
 details.reset_index(inplace=True)
 details.rename(columns={"index": "appId"}, inplace=True)
 
@@ -64,10 +75,6 @@ print(description_embeddings.shape)
 # Create a 2D embedding
 reducer = umap.UMAP(n_components=2, random_state=1)
 embedding = reducer.fit_transform(description_embeddings)
-
-# %%
-# Check the shape of the reduced embedding array
-embedding.shape
 
 # %%
 # Create another low-dim embedding for clustering
@@ -123,24 +130,9 @@ print(f"{len(df[df.cluster == -1].cluster.to_list())} unassigned apps remain.")
 # %%
 # Visualise using altair (NB: -1=points haven't been assigned to a cluster)
 fig = (
-    alt.Chart(df.reset_index(), width=750, height=750)
+    alt.Chart(df.reset_index(), width=725, height=725)
     .mark_circle(size=60)
     .encode(x="x", y="y", tooltip=["cluster", "appId", "summary"], color="cluster:N")
-).interactive()
-
-fig
-
-# %%
-
-fig = (
-    alt.Chart(df.reset_index(), width=750, height=750)
-    .mark_circle(size=60)
-    .encode(
-        x="x",
-        y="y",
-        tooltip=["cluster", "appId", "summary"],
-        color="cluster_relevance:N",
-    )
 ).interactive()
 
 fig
@@ -248,24 +240,16 @@ for a_id in set(extra_apps + apps_of_interest):
 
 relevant_clusters
 
-
-# %%
-def get_cluster_info(needle: int, haystack: dict):
-    """
-    Get information about a cluster given its id
-    """
-
-    for k, v in haystack.items():
-        if needle in v.keys():
-            return (k, v[needle])
-
-    return 0
-
 # %%
 driver = google_chrome_driver_setup()
 
 # %%
-save_altair(fig, "cluster_descriptions", driver)
+# save the figure if so wished (Currently throws an error on MRH M1)
+# save_altair(fig, "cluster_descriptions", driver)
+
+# %% [markdown]
+# Following code repeats the steps above, but uses apps' summaries (rather than their descriptions) to do the clustering. This
+# provides a point of validation/confirmation
 
 # %%
 filename = "summary_embeddings-22-01-21.pickle"
@@ -397,6 +381,30 @@ s_cluster_options = {
     },
 }
 
+
+# %%
+def get_cluster_info(needle: int, haystack: dict):
+    """
+    Get information about a cluster from the 'relevance' dictionaries based on a cluster's id
+
+    Example usage: relevance, purpose = get_cluster_info(4, s_cluster_options)
+        Returns: relevance = "relevant"; purpose = "learning through play / learning to code/ professional development"
+
+    Args:
+        needle, int: the cluster to search for
+        haystack, dict: the dict with the cluster info, within which you're looking
+
+    Returns:
+        Tuple(the key of the cluster that you're looking for, the purpose of the cluster)
+    """
+
+    for k, v in haystack.items():
+        if needle in v.keys():
+            return (k, v[needle])
+
+    return 0
+
+
 # %%
 cluster_relevance_ = list()
 s_cluster_relevance_ = list()
@@ -422,25 +430,26 @@ df["s_cluster_purpose"] = s_cluster_type_
 df["s_cluster_confidence"] = s_df["s_cluster_confidence"]
 
 # %%
+
+fig = (
+    alt.Chart(df.reset_index(), width=750, height=750)
+    .mark_circle(size=60)
+    .encode(
+        x="x",
+        y="y",
+        tooltip=["cluster", "appId", "summary"],
+        color="cluster_relevance:N",
+    )
+).interactive()
+
+fig
+
+# %%
 df.sample(10)
 
 # %%
-df.to_csv(
-    INPUT_DATA / "apps_to_review.csv",
-    columns=[
-        "appId",
-        "title",
-        "summary",
-        "description",
-        "score",
-        "installs",
-        "genre",
-        "cluster_purpose",
-        "cluster_confidence",
-        "cluster_relevance",
-        "s_cluster_purpose",
-        "s_cluster_confidence",
-        "s_cluster_relevance",
-    ],
-    index=False,
-)
+# Save list of apps to review
+# df.to_csv(INPUT_DATA / "apps_to_review.csv", columns=["appId", "title", "summary", "description", "score", "installs", "genre", "cluster_purpose", "cluster_confidence", "cluster_relevance", "s_cluster_purpose", "s_cluster_confidence", "s_cluster_relevance"], index=False)
+
+# %%
+df.cluster.unique().tolist()
