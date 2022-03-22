@@ -26,7 +26,10 @@ import json
 import numpy as np
 
 from mapping_parenting_tech import PROJECT_DIR, logging
+from mapping_parenting_tech.utils import play_store_utils as psu
 from pathlib import Path
+
+import altair as alt
 
 INPUT_PATH = PROJECT_DIR / "inputs/data/play_store"
 DATA_PATH = PROJECT_DIR / "outputs/data"
@@ -61,7 +64,9 @@ apps_for_parents = [
     "Baby photos",
     "Fertility tracking",
 ]
-relevant_apps[relevant_apps["cluster"].isin(apps_for_parents)].shape
+apps_for_kids = list(set(relevant_apps["cluster"]) - set(apps_for_parents))
+# relevant_apps[relevant_apps["cluster"].isin(apps_for_parents)].shape
+apps_for_kids
 
 # %%
 relevant_apps.groupby("cluster").count()
@@ -120,3 +125,38 @@ foo = relevant_app_details.groupby(["developer", "cluster"], as_index=False).agg
     cCount=("cluster", "count")
 )
 foo[foo["developer"].isin(top_devs)]
+
+# %% [markdown]
+# Dig into a specific developer to see how their apps have been changed in terms of ratings/reviews over time
+
+# %%
+# set the target developer and download reviews about that developer's apps
+target_dev = "Sago Mini"
+dev_apps = relevant_app_details[relevant_app_details["developer"] == target_dev][
+    "app_id"
+]
+
+dev_reviews = psu.load_some_app_reviews(dev_apps.to_list())
+
+# %%
+# approximate how many months ago the review was left
+
+dev_reviews["months_ago"] = -1 * np.round(
+    ((pd.Timestamp.now() - dev_reviews["at"]).dt.days) / (365 / 12), 0
+)
+
+# %%
+dev_reviews_by_month = dev_reviews.groupby("months_ago", as_index=False).agg(
+    # app_count = ("appId", "count"),
+    review_count=("reviewId", "count"),
+    av_score=("score", np.mean),
+)
+dev_reviews_by_month
+
+# %%
+fig = (
+    alt.Chart(dev_reviews_by_month)
+    .mark_circle()
+    .encode(x="months_ago", y="review_count:Q")
+)
+fig
