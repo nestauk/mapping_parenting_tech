@@ -82,6 +82,13 @@ app_reviews = app_reviews.merge(app_details[["appId", "minInstalls"]], on="appId
 # The initial figures are derived from apps' details - i.e., their `minInstalls` count, and their score, all grouped by cluster and averaged accordingly.
 
 # %%
+plot_df = app_details.groupby("cluster", as_index=False).agg(
+    app_count=("appId", np.count_nonzero)
+)
+
+plot_df.plot.bar(x="cluster", y=["app_count"], figsize=(10, 8))
+
+# %%
 # group by minInstalls and then
 # 1. count how many apps have been installed that many (`minInstall`) times
 # 2. get the average score for the apps that have been installed that many times
@@ -158,13 +165,23 @@ alt.layer(store_fig, sample_fig).resolve_scale(
 )
 
 # %%
-alt.Chart(plot_df, width=700, height=600).mark_bar().encode(
-    y=alt.Y(
-        "Category:N",
-        sort=alt.EncodingSortField(field="sample_cat_pc", order="descending"),
-    ),
-    x=alt.X("sample_cat_pc"),
+app_details.columns
+
+# %%
+# Plot the number of apps released each year
+
+# change next line to filter dataframe or use everything
+plot_df = app_details.loc[app_details["cluster"] == "Parental support"][
+    ["appId", "released"]
+]
+plot_df["year_released"] = pd.DatetimeIndex(plot_df["released"]).year
+plot_df = plot_df.groupby("year_released", as_index=False).agg(
+    app_count=("appId", "count")
 )
+
+plot_df["growth"] = plot_df["app_count"].pct_change()
+plot_df.plot.bar(x="year_released", y=["app_count"], figsize=(10, 8))
+print("Average number of apps each year: ", plot_df["app_count"].mean())
 
 # %%
 plot_df = (
@@ -187,6 +204,9 @@ plot_df = (
     .sort_values("score_mean")
 )
 plot_df
+
+# %% [markdown]
+# ### Apps' average scores by cluster
 
 # %%
 plt_column = "score"
@@ -230,11 +250,12 @@ fig = (
 fig
 
 # %% [markdown]
-# ## Look at reviews by date
+# ## Using reviews over time as proxy for growth
 # Frequency of reviews etc.
 
 # %%
 # Create a new dataframe, `reviewDates`, with the number of reviews for each app per year
+
 review_dates = (
     app_reviews.groupby(["appId", "reviewYear"])["appId"]
     .count()
@@ -244,7 +265,6 @@ review_dates = (
 app_total_reviews = app_reviews.groupby(["appId"])["appId"].count()
 review_dates["total_reviews"] = review_dates["appId"].map(app_total_reviews)
 review_dates = review_dates.merge(focus_apps, on=["appId"])
-review_dates.sample(5)
 
 
 # %%
@@ -267,19 +287,19 @@ review_dates = review_dates.merge(
 )
 
 # %%
-# Move all this into a new dataframe
+# Extract columns of interest into a new dataframe, `df`
+
 df = pd.DataFrame(
     columns=["appId", "total_reviews", "growth", "cluster", "minInstalls", "score"],
     data=review_dates[
-        ["appId", "total_reviews", "2021_growth", "cluster", "minInstalls", "score"]
+        ["appId", 2021, "2021_growth", "cluster", "minInstalls", "score"]
     ].values,
     index=review_dates.index,
 )
 
 # %%
-df.sample(5)
+# identify appropriate thresholds for segmenting data
 
-# %%
 percentile = 90
 print(f"Median of `total_reviews`:", np.percentile(df.total_reviews, 50))
 print(f"{percentile} percentile of `growth`:", np.percentile(df.growth, percentile))
@@ -289,7 +309,7 @@ print(f"{percentile} of `score`:", np.percentile(df.score, percentile))
 growth_threshold = 200
 score_threshold = 3.8
 hot_growth = 4.23
-hot_review_count = 113
+hot_review_count = 29
 
 hot_apps = df.loc[
     (df["score"] >= score_threshold)
@@ -316,10 +336,27 @@ summary_df["median_growth"] = np.round(summary_df["median_growth"], 2)
 summary_df.sort_values(["status", "median_growth"], ascending=False)
 
 # %%
+_top_apps = hot_apps[hot_apps["cluster"] == "Literacy - English / Reading and Stories"][
+    "appId"
+].to_list()
+review_dates[review_dates["appId"].isin(_top_apps)]
+
+# %%
+check_df = review_dates[review_dates["cluster"] == "Pregnancy tracking"][
+    ["appId", 2019, 2021, "2021_growth"]
+]
+print("Total number of reviews in 2019:\t\t", check_df[2019].sum())
+print("Total number of reviews in 2021:\t\t", check_df[2021].sum())
+print("Average change between 2019 and 2021:\t", check_df["2021_growth"].mean())
+check_df
+
+# %%
+df[df.cluster == "Pregnancy tracking"].growth.mean()
+
+# %%
 # And another dataframe to use for the plot - selecting highly rated apps whose growth isn't 'excessive'
 plot_df = df[(df["score"] >= score_threshold) & (df["growth"] < growth_threshold)]
 
-# %%
 xscale = alt.Scale(type="log")
 yscale = alt.Scale(base=10)
 
@@ -485,50 +522,9 @@ ax.set_xticklabels(df.cluster.unique())
 fig.legend(loc="upper right")
 
 # %%
-from scipy import stats
-
-app_costs = app_details[app_details.price > 0].price.to_list()
-print(
-    len(app_costs),
-    np.mean(app_costs),
-    np.median(app_costs),
-    stats.mode(app_costs)[0],
-    np.min(app_costs),
-    np.max(app_costs),
-)
-
-# %%
-price_distro = (
-    app_details.groupby("price")
-    .agg(
-        appId=("appId", "count"),
-    )
-    .reset_index()
-)
-price_distro.drop(price_distro.index[0], inplace=True)
-
-# %%
-fig = (
-    alt.Chart(price_distro, width=700, height=500)
-    .mark_circle(size=50)
-    .encode(x="price", y="appId")
-)
-fig
-
-# %%
-foo = app_details.groupby("score")["score"].count()
-
-# %%
-foo = foo.drop(index=[0.000000])
-
-# %%
-score_fig = plt.scatter(x=range(0, len(foo)), y=foo)
-score_fig
-
-# %%
+# Extract the year that each app was released and place in a separate column
 # app_details["released"] = pd.to_datetime(app_details["released"])
 app_details["releaseYear"] = pd.to_datetime(app_details["released"]).dt.year
-app_details.head()
 
 # %%
 app_growth = app_details.groupby(["releaseYear", "cluster"], as_index=False).agg(
@@ -549,20 +545,21 @@ app_growth.groupby("cluster").agg(average_growth=("growth", "mean")).sort_values
 )
 
 # %%
-cluster_growth = (
+cluster_size_by_year = (
     app_details.groupby(by=["cluster", "releaseYear"])["appId"]
     .count()
     .cumsum()
     .reset_index()
 )
-cluster_growth.rename(columns={"appId": "app_count"}, inplace=True)
-cluster_growth["normalised"] = cluster_growth["app_count"] / cluster_growth.groupby(
-    "cluster"
-)["app_count"].transform("max")
+cluster_size_by_year.rename(columns={"appId": "app_count"}, inplace=True)
+cluster_size_by_year["normalised"] = cluster_size_by_year[
+    "app_count"
+] / cluster_size_by_year.groupby("cluster")["app_count"].transform("max")
+cluster_size_by_year
 
 # %%
 fig = (
-    alt.Chart(cluster_growth, width=700, height=700)
+    alt.Chart(cluster_size_by_year, width=700, height=700)
     .mark_line()
     .encode(
         x="releaseYear:N",
@@ -570,7 +567,7 @@ fig = (
         color="cluster:N",
         tooltip=["cluster"],
     )
-).interactive()
+)
 fig
 
 # %%
@@ -586,22 +583,24 @@ review_growth["cumulative_count"] = review_growth.groupby(["cluster"], as_index=
 ].cumsum()
 
 review_growth = review_growth.merge(
-    cluster_growth,
+    cluster_size_by_year,
     how="left",
     left_on=["cluster", "reviewYear"],
     right_on=["cluster", "releaseYear"],
 )
 review_growth["app_count"].ffill(inplace=True)
+review_growth.drop(columns=["releaseYear"])
 
 review_growth["normalised_by_cluster"] = (
-    review_growth["cumulative_count"] / review_growth["app_count"]
+    review_growth["review_count"] / review_growth["app_count"]
 )
+
 review_growth["normalised"] = review_growth[
     "normalised_by_cluster"
 ] / review_growth.groupby("cluster")["normalised_by_cluster"].transform("min")
 
 # %%
-review_growth[review_growth.cluster == "Keeping in touch"]
+review_growth[review_growth.cluster == "Pregnancy tracking"]
 
 # %%
 fig = (
@@ -670,7 +669,7 @@ fig = (
             scale=alt.Scale(type="linear"),
         ),
         y=alt.Y(
-            "normalised_by_cluster_size:Q",
+            "growth:Q",
             axis=alt.Axis(
                 title=f"Growth between {start_year} and {end_year} measured by number of reviews"
             ),
@@ -682,3 +681,21 @@ fig = (
     )
 )
 fig
+
+# %%
+review_growth_by_app = review_dates[
+    ["appId", 2019, 2021, "2021_growth", "cluster", "minInstalls", "score"]
+]
+review_growth_by_app[[2019, 2021]].fillna(1, inplace=True)
+review_growth_by_app["pc_change"] = (
+    review_growth_by_app[2021] / review_growth_by_app[2019]
+) - 1
+
+growth_summary = review_growth_by_app.groupby("cluster").agg(
+    mean_change=("pc_change", np.mean),
+    stdev=("pc_change", np.std),
+    median_change=("pc_change", np.median),
+    IQR=("pc_change", lambda x: np.subtract(x.quantile(0.75), x.quantile(0.25))),
+)
+
+growth_summary
