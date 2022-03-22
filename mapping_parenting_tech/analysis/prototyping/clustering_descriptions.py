@@ -20,10 +20,10 @@
 #
 # Process is to...
 # 1. embed the descriptions into high dimensional vectors using `SentenceTransformer`
-# 2. reduce dimentionality using `UMAP`
+# 2. reduce dimensionality using `UMAP`
 # 3. cluster the reduced-dimension vectors using `hdbscan`
-# 4. further reduce dimentionality to 2D, such that results can be visualised
-# 5. use `sklean` to assign any apps that weren't clustered by `hdbscan`
+# 4. further reduce dimensionality to 2D, such that results can be visualised
+# 5. use `KNeighborsClassifier ` from `scikit-learn` to assign apps that weren't clustered by `hdbscan` to their closest cluster
 # 5. plot results of clustering
 #
 # Following the initial clustering, clusters have been given more meaningful names and grouped together according to whether they
@@ -402,7 +402,7 @@ def get_cluster_info(needle: int, haystack: dict):
         if needle in v.keys():
             return (k, v[needle])
 
-    return 0
+    return (0, 0)
 
 
 # %%
