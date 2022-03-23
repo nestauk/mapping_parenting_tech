@@ -43,6 +43,7 @@ import pandas as pd
 import pickle
 from mapping_parenting_tech import PROJECT_DIR, logging
 from sklearn.neighbors import KNeighborsClassifier
+from sklearn.metrics import adjusted_mutual_info_score
 
 alt.data_transformers.disable_max_rows()
 
@@ -138,6 +139,9 @@ fig = (
 fig
 
 # %%
+# two lists of apps that are of particular interest/relevance. Apps are captured in these lists to check
+# which clusters they are in, if so wished
+
 apps_of_interest = [
     "com.easypeasyapp.epappns",
     "com.lingumi.lingumiplay",
@@ -188,6 +192,15 @@ extra_apps = [
     "com.propagator.squeezy",
     "com.sitekit.eRedBook",
 ]
+
+# %% [markdown]
+# Based on the result of the above clustering, the apps seem to fall into four broad categories:
+# 1. **Relevant**: apps that seem to have clear relevance to AFS and/or HLE
+# 2. **Interesting**: apps that could be of interest but need closer inspection
+# 3. **Unlikely**: similar to 2, but are more likely to not be of interest
+# 4. **Discard**: apps that will almost certainly not be relevant and can be discarded from future analyses
+#
+# These categories will be carried forward into a CSV file that can be imported into Google Sheets/Excel etc. for manual review
 
 # %%
 cluster_options = {
@@ -245,7 +258,7 @@ driver = google_chrome_driver_setup()
 
 # %%
 # save the figure if so wished (Currently throws an error on MRH M1)
-# save_altair(fig, "cluster_descriptions", driver)
+# save_altair(fig, "cluster_descriptions_", driver)
 
 # %% [markdown]
 # Following code repeats the steps above, but uses apps' summaries (rather than their descriptions) to do the clustering. This
@@ -316,6 +329,9 @@ for x in unassigned_indices:
     s_df.iat[x, s_cluster_col] = neigh.predict([s_embedding_clustering[x]])
 
 print(f"{len(s_df[s_df.s_cluster == -1].s_cluster.to_list())} unassigned apps remain.")
+
+# Check the correspendence between both clustering approaches
+print(adjusted_mutual_info_score(s_df.s_cluster.to_list(), df.cluster.to_list()))
 
 # %%
 # Visualise using altair (NB: -1=points haven't been assigned to a cluster)
@@ -450,6 +466,3 @@ df.sample(10)
 # %%
 # Save list of apps to review
 # df.to_csv(INPUT_DATA / "apps_to_review.csv", columns=["appId", "title", "summary", "description", "score", "installs", "genre", "cluster_purpose", "cluster_confidence", "cluster_relevance", "s_cluster_purpose", "s_cluster_confidence", "s_cluster_relevance"], index=False)
-
-# %%
-df.cluster.unique().tolist()
