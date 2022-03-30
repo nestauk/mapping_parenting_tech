@@ -34,6 +34,7 @@ from tqdm.notebook import tqdm
 DATA_DIR = PROJECT_DIR / "outputs/data"
 REVIEWS_DIR = DATA_DIR / "app_reviews"
 INPUT_DIR = PROJECT_DIR / "inputs/data/play_store"
+OUTPUT_DIR = PROJECT_DIR / "outputs/data"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 # %%
@@ -69,6 +70,9 @@ app_details = app_details.astype({"score": "float16", "minInstalls": "int64"})
 app_details["score"] = np.around(app_details["score"].to_list(), 1)
 
 # %%
+focus_apps["cluster"].unique().tolist()
+
+# %%
 # add `minInstalls` to apps' reviews
 
 app_reviews = app_reviews.merge(app_details[["appId", "minInstalls"]], on="appId")
@@ -86,7 +90,9 @@ plot_df = app_details.groupby("cluster", as_index=False).agg(
     app_count=("appId", np.count_nonzero)
 )
 
-plot_df.plot.bar(x="cluster", y=["app_count"], figsize=(10, 8))
+plot_df.sort_values("app_count", ascending=False).plot.bar(
+    x="cluster", y=["app_count"], figsize=(10, 8)
+)
 
 # %%
 # group by minInstalls and then
@@ -136,8 +142,10 @@ alt.layer(counts, scores).resolve_scale(y="independent")
 # ## Comparisons with Play Store
 
 # %%
-foo = pd.read_csv("~/Downloads/category_sizes.csv", index_col=0)
-foo.head()
+# Load the number of apps in each category on the Play Store
+
+cat_sizes = pd.read_csv(INPUT_DIR / "category_sizes.csv", index_col=0)
+cat_sizes.head()
 
 # %%
 plot_df = (
@@ -149,7 +157,7 @@ plot_df = (
     .multiply(100)
 )
 
-plot_df = plot_df.merge(foo, how="left", left_on="genre", right_on="Category")
+plot_df = plot_df.merge(cat_sizes, how="left", left_on="genre", right_on="Category")
 
 # %%
 base = alt.Chart(plot_df, width=700, height=550).encode(
@@ -165,23 +173,63 @@ alt.layer(store_fig, sample_fig).resolve_scale(
 )
 
 # %%
-app_details.columns
-
-# %%
-# Plot the number of apps released each year
-
-# change next line to filter dataframe or use everything
-plot_df = app_details.loc[app_details["cluster"] == "Parental support"][
-    ["appId", "released"]
-]
+plot_df = app_details[["appId", "released"]]
 plot_df["year_released"] = pd.DatetimeIndex(plot_df["released"]).year
+plot_df["month_released"] = pd.DatetimeIndex(plot_df["released"]).month
 plot_df = plot_df.groupby("year_released", as_index=False).agg(
-    app_count=("appId", "count")
+    app_count=("appId", "count"),
+    months_in_year=("month_released", lambda x: x.nunique()),
 )
 
-plot_df["growth"] = plot_df["app_count"].pct_change()
-plot_df.plot.bar(x="year_released", y=["app_count"], figsize=(10, 8))
-print("Average number of apps each year: ", plot_df["app_count"].mean())
+plot_df["apps_per_month"] = plot_df["app_count"] / plot_df["months_in_year"]
+plot_df["growth"] = plot_df["apps_per_month"].pct_change()
+plot_df.plot.line(x="year_released", y=["growth"], figsize=(10, 8), ylim=(-0.5, 2.2))
+
+# %%
+# Plot the number of apps released each year in each cluster
+
+fig = plt.figure(figsize=(10, 8))
+
+for cluster in [
+    "Parental support",
+    "Tracking babies' rhythms",
+    "Fertility tracking",
+    "Pregnancy tracking",
+]:
+    plot_df = app_details.loc[app_details["cluster"] == cluster][["appId", "released"]]
+    plot_df["year_released"] = pd.DatetimeIndex(plot_df["released"]).year
+    plot_df["month_released"] = pd.DatetimeIndex(plot_df["released"]).month
+    plot_df = plot_df.groupby("year_released", as_index=False).agg(
+        app_count=("appId", "count"),
+        months_in_year=("month_released", lambda x: x.nunique()),
+    )
+
+    plot_df["apps_per_month"] = plot_df["app_count"] / plot_df["months_in_year"]
+    plot_df["growth"] = plot_df["apps_per_month"].pct_change()
+
+    plt.plot(plot_df["year_released"], plot_df["growth"], label=cluster)
+
+plt.legend(loc="upper right")
+fig.show()
+
+# %%
+play_store_growth = pd.read_csv(OUTPUT_DIR / "play_store_growth.csv", index_col=0)
+
+# %%
+fig = plt.figure(figsize=(10, 8))
+
+plt_label = ["Play store", "Sample"]
+
+for i, frame in enumerate([play_store_growth, plot_df]):
+    plt.plot(frame["year_released"], frame["growth"], label=plt_label[i])
+
+fig.legend(loc="upper right")
+plt.ylabel("Year on year growth")
+plt.xlabel("Release year")
+fig.show()
+
+
+# %%
 
 # %%
 plot_df = (
@@ -265,6 +313,9 @@ review_dates = (
 app_total_reviews = app_reviews.groupby(["appId"])["appId"].count()
 review_dates["total_reviews"] = review_dates["appId"].map(app_total_reviews)
 review_dates = review_dates.merge(focus_apps, on=["appId"])
+
+# %%
+review_dates.total_reviews.max()
 
 
 # %%
@@ -354,6 +405,9 @@ check_df
 df[df.cluster == "Pregnancy tracking"].growth.mean()
 
 # %%
+df["total_reviews"].max()
+
+# %%
 # And another dataframe to use for the plot - selecting highly rated apps whose growth isn't 'excessive'
 plot_df = df[(df["score"] >= score_threshold) & (df["growth"] < growth_threshold)]
 
@@ -364,7 +418,7 @@ fig = (
     alt.Chart(plot_df, width=650, height=650)
     .mark_circle(filled=True, size=60)
     .encode(
-        alt.X("total_reviews", scale=xscale),
+        alt.X("total_reviews", scale=xscale, title="Total reviews in 2021"),
         alt.Y("growth", scale=yscale),
         color="cluster:N",
         tooltip=["appId", "cluster", "minInstalls"],
@@ -613,7 +667,7 @@ fig = (
         y=alt.Y(
             "normalised:Q",
             axis=alt.Axis(
-                title="Cumulative growth as reviews per app, normalised as growth from inception"
+                title="Number of reviews per app, normalised to number of reviews in clusters' first year"
             ),
             scale=alt.Scale(type="linear"),
         ),
