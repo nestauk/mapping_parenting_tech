@@ -576,6 +576,14 @@ ax.set_xticklabels(df.cluster.unique())
 fig.legend(loc="upper right")
 
 # %%
+print("Mean free:", df.free_pc.mean())
+print("Mean ads:", df.ads_pc.mean())
+print("Mean IAPs:", df.IAPs_pc.mean())
+
+# %%
+df
+
+# %%
 # Extract the year that each app was released and place in a separate column
 # app_details["released"] = pd.to_datetime(app_details["released"])
 app_details["releaseYear"] = pd.to_datetime(app_details["released"]).dt.year
