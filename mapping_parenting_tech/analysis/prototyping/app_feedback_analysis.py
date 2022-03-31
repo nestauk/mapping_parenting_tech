@@ -138,6 +138,20 @@ scores = base.mark_line(stroke="red").encode(
 )
 alt.layer(counts, scores).resolve_scale(y="independent")
 
+# %%
+
+# %%
+app_installs_by_cluster = app_details.groupby(
+    ["cluster", "minInstalls"], as_index=False
+).agg(appCount=("minInstalls", "count"))
+
+alt.Chart(app_installs_by_cluster).mark_point().encode(
+    alt.X("minInstalls:Q", scale=alt.Scale(type="log"), axis=alt.Axis(tickCount=6)),
+    y="appCount:Q",
+    color="cluster:N",
+).properties(width=200, height=200).facet(facet="cluster:N", columns=4)
+
+
 # %% [markdown]
 # ## Comparisons with Play Store
 
