@@ -7,11 +7,11 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.13.6
+#       jupytext_version: 1.13.7
 #   kernelspec:
 #     display_name: 'Python 3.8.12 64-bit (''mapping_parenting_tech'': conda)'
 #     language: python
-#     name: python3812jvsc74a57bd09d0629e00499ccf218c6720a848e8111287e8cbf09d1f93118d5865a19869c30
+#     name: python3
 # ---
 
 # %%
@@ -39,63 +39,12 @@ REVIEWS_DATA = PROJECT_DIR / "outputs/data/app_reviews"
 app_info = pd.read_csv(INPUT_DATA / "relevant_app_ids.csv")
 app_clusters = app_info["cluster"].unique().tolist()
 
-
-# %%
-def load_some_app_reviews(app_ids: list) -> pd.DataFrame:
-    """
-    Load reviews for a given set of Play Store apps
-
-    Args:
-        app_ids: list - a list of app ids whose reviews will be loaded
-
-    Returns:
-        Pandas DataFrame
-
-    """
-
-    data_types = {
-        "app_id": str,
-        "content": str,
-        "score": int,
-        "thumbsUpCount": int,
-        "reviewCreatedVersion": str,
-        "replyContent": str,
-        "reviewId": str,
-    }
-
-    reviews_df_list = []
-    logging.info("Reading app reviews")
-    for app_id in tqdm(app_ids, position=0):
-        try:
-            review_df = pd.read_csv(
-                REVIEWS_DATA / f"{app_id}.csv",
-                dtype=data_types,
-                parse_dates=["at", "repliedAt"],
-            )
-        except FileNotFoundError:
-            logging.info(f"No reviews for {app_id}")
-            review_df = []
-        reviews_df_list.append(review_df)
-
-    logging.info("Concatenating reviews")
-    reviews_df = pd.concat(reviews_df_list)
-
-    del reviews_df_list
-
-    logging.info("Reviews loaded")
-
-    return reviews_df
-
-
 # %%
 # load the reviews for the relevant apps
-app_reviews = load_some_app_reviews(app_info["app_id"].to_list())
-
-# rename the appId column...
-app_reviews.rename(columns={"appId": "app_id"}, inplace=True)
+app_reviews = psu.load_some_app_reviews(app_info["appId"].to_list())
 
 # add the cluster that each add is in to the review
-app_reviews = app_reviews.merge(app_info, left_on="app_id", right_on="app_id")
+app_reviews = app_reviews.merge(app_info, on="appId")
 
 # what have we got...?
 app_reviews.shape
@@ -104,16 +53,16 @@ app_reviews.shape
 # get a subset of reviews - here it's those written in the last year about apps in the
 # cluster 'Numeracy development'
 target_reviews = app_reviews.loc[
-    (app_reviews["at"] >= "2021-02-01")
+    (app_reviews["at"] >= pd.to_datetime("2021-02-01"))
     # & (app_reviews["cluster"] == "Numeracy development")
 ]
 target_reviews.shape
 
 # %%
 # if we want to visualise the distribution of the reviews, group the apps by their id and cluster
-# and count the number of reviews
+# and count the number of reviews for each app
 
-app_review_counts = target_reviews.groupby(["app_id", "cluster"]).agg(
+app_review_counts = target_reviews.groupby(["appId", "cluster"]).agg(
     review_count=("reviewId", "count"),
 )
 
@@ -122,6 +71,8 @@ app_review_counts.reset_index(inplace=True)
 
 # %%
 # plot the data
+# x-axis groups clusters together and assigns a 'jitter' value to randomly distribute apps w/in the cluster horizontally
+# y-axis is simply the number of reviews for an app
 
 stripplot = (
     alt.Chart(app_review_counts, width=75)
@@ -148,7 +99,7 @@ stripplot = (
                 labelPadding=3,
             ),
         ),
-        tooltip=["app_id"],
+        tooltip=["appId"],
     )
     .transform_calculate(
         # Generate Gaussian jitter with a Box-Muller transform
@@ -178,6 +129,11 @@ app_review_counts.groupby("cluster").agg(
 
 tp_reviews = target_reviews[target_reviews.cluster == "Drawing and colouring"]
 tp_reviews.shape
+
+# %% [markdown]
+# **NB** Following code **should not** be executed unless reviews need to be pre-processed. This step, once complete, should save the reviews for later use
+#
+# **Ignore all that follows, up until the next markdown cell**
 
 # %%
 # get a preprocess the review text ready for topic modelling
@@ -362,7 +318,7 @@ plot_topic_proportions(best_c, model_name="Best Coherence Model")
 app_reviews_df["review_length"] = app_reviews_df["content"].str.count(" ") + 1
 
 # %%
-r_len_df = app_reviews_df.groupby("app_id").agg(
+r_len_df = app_reviews_df.groupby("appId").agg(
     av_review_len=("review_length", "mean"),
     max_review=("review_length", "max"),
     min_review=("review_length", "min"),
@@ -379,11 +335,14 @@ r_len_df.describe()
 # %%
 app_reviews_df["content"].sample(25)
 
+# %% [markdown]
+# **USEFUL CODE RESUMES HERE**
+
 # %%
 # load all of the preprocessed reviews
 
 data_types = {
-    "app_id": str,
+    "appId": str,
     "content": str,
     "score": int,
     "thumbsUpCount": int,
@@ -397,7 +356,7 @@ fields = list(data_types.keys())
 fields.extend(["at", "repliedAt"])
 
 tp_reviews = pd.read_csv(
-    OUTPUT_DATA / "tpm/foo.csv",
+    OUTPUT_DATA / "tpm/preprocessed_reviews.csv",
     usecols=fields,
     dtype=data_types,
     parse_dates=["at", "repliedAt"],
@@ -437,15 +396,15 @@ for review in tp_reviews.preprocessed_review.to_list():
 
 
 # %%
-duff = empty_reviews[4]
-print(duff["row"], duff["reviewId"])
+len(empty_reviews)
 
 # %%
 rows_to_drop = [duff["row"] for duff in empty_reviews]
-rows_to_drop
 
 # %%
-foo = tp_reviews.drop(rows_to_drop)
+foo = tp_reviews.drop(
+    index=tp_reviews.iloc[rows_to_drop].index
+)  # NB: think this would also work as `tp_reviews.drop[tp_reviews.index[rows_to_drop]]`
 foo.shape
 
 # %%
@@ -465,6 +424,15 @@ for review in foo.preprocessed_review.to_list():
     j += 1
 print(len(corpus))
 
+
+# %% [markdown]
+# Following functions and cells that call them are for testing different variables to initialise the model.
+#
+# Running them in their entirety will take many hours (more likely days) - each iteration of testing can take anywhere from 8-15 minutes.
+#
+# The outputs from each iteration are saved in a CSV file (`model_scores.csv`), which can be interrogated to see whether the each set of parameters yield a better model.
+# It's likely that as the process proceeds, the model will improve to a point, after which there will either be no further improvements, or it will begin to get worse.
+# At this point, it's worth stopping further execution.
 
 # %%
 # Set up a function to help explore the variables we need to train the model - at what point does log likelihood and/or coherence converge?
@@ -495,6 +463,10 @@ def test_model(
 
 
 # %%
+# set the starting parameters
+# `from_iters` is the number of iterations for training
+# `from_k` is the number of topics - if this is left blank, it will start at 5, but if you want to pick up part-way through a run, it can be increased
+
 from_iters = 1250
 from_k = 31
 
@@ -515,6 +487,9 @@ for i in range(from_iters, 2100, 250):
                 writer.writerow(model_score)
 
 # %%
+# repeats the process above, but with smaller increments to `from_iters`
+# also works with a limited number of topics, as defined in the list, `test_topics`
+
 test_topics = [52]
 
 from_iters = 900
@@ -537,6 +512,10 @@ for i in range(from_iters, 1250, 50):
                 writer.writerow(model_score)
 
 # %%
+# load the model scores that we saved from all the testing, above, and plot to help visualise which parameters are best
+# NB: these could be plotted in 3D - n_iters vs n_topics vs coherence
+# best score simply looks for the highest coherence score in the data and returns the number of iterations and topics associated with that score
+
 model_scores = pd.read_csv(OUTPUT_DATA / "tpm/model_scores.csv")
 
 best_score = model_scores[model_scores["COHERENCE"] == model_scores["COHERENCE"].max()]
@@ -555,13 +534,7 @@ print(f"Optimum number of topics: {n_topics}")
 print(f"Optimum number of training iterations: {n_iter}")
 
 # %%
-n_topics = 52
-n_iter = 1100
-
 final_model = tp.LDAModel(k=n_topics, corpus=corpus, seed=250)
-
-# %%
-len(final_model.docs)
 
 # %%
 for i in tqdm(range(0, n_iter, 10)):
@@ -569,6 +542,10 @@ for i in tqdm(range(0, n_iter, 10)):
 
 # %%
 print(tp.coherence.Coherence(final_model, coherence="c_v").get_score())
+
+# %% [markdown]
+# Use Karlis' functions to save the model and associate data. Note, I have not assigned names etc. to the topics, so in *not* passing `manual_labels` to `save_lda_model_data` the
+# function does not complete successfully. However, it does still manage to save the other key files and the table with topic descriptions can be added *post hoc*.
 
 # %%
 from mapping_parenting_tech.utils import lda_modelling_utils as lmu
@@ -582,5 +559,3 @@ lmu.save_lda_model_data(
     final_model,
     list(foo["reviewId"]),
 )
-
-# %%

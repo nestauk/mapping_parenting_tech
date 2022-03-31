@@ -31,54 +31,6 @@ DATA_DIR = PROJECT_DIR / "outputs/data/"
 REVIEWS_DATA = DATA_DIR / "app_reviews"
 INPUT_DIR = PROJECT_DIR / "inputs/data/play_store"
 
-
-# %%
-def load_some_app_reviews(app_ids: list) -> pd.DataFrame:
-    """
-    Load reviews for a given set of Play Store apps
-
-    Args:
-        app_ids: list - a list of app ids whose reviews will be loaded
-
-    Returns:
-        Pandas DataFrame
-
-    """
-
-    data_types = {
-        "appId": str,
-        "content": str,
-        "reviewId": str,
-        "score": int,
-        "thumbsUpCount": int,
-    }
-
-    fields = list(data_types.keys())
-
-    reviews_df_list = []
-    logging.info("Reading app reviews")
-    for app_id in tqdm(app_ids, position=0):
-        try:
-            review_df = pd.read_csv(
-                REVIEWS_DATA / f"{app_id}.csv",
-                usecols=fields,
-                dtype=data_types,
-            )
-        except FileNotFoundError:
-            logging.info(f"No reviews for {app_id}")
-            review_df = []
-        reviews_df_list.append(review_df)
-
-    logging.info("Concatenating reviews")
-    reviews_df = pd.concat(reviews_df_list)
-
-    del reviews_df_list
-
-    logging.info("Reviews loaded")
-
-    return reviews_df
-
-
 # %%
 # Load model and associated data - step can take a few minutes
 model_data = lmu.load_lda_model_data(model_name=MODEL_NAME, folder=TPM_DIR)
@@ -115,27 +67,42 @@ clusters = relevant_apps.cluster.unique().tolist()
 relevant_reviews = psu.load_some_app_reviews(relevant_apps.appId.to_list())
 
 # %%
+# add the app details, including cluster info, to the reviews dataframe
+
 relevant_reviews = relevant_reviews.merge(relevant_apps, on="appId")
 
 # %%
+# merge the reviews onto the topic_probability_table such that we have a consolidated table with the review id, topic probabilities and review content all in one place
+
 review_topic_details = topic_probability_table.merge(
     relevant_reviews, left_on="id", right_on="reviewId"
 ).drop(columns=["reviewId"])
 
 # %%
+# quick reminder of the clusters
+
 clusters
 
 # %%
+# calculate the topic probabilities for each cluster
+# each review is associated with one app, which is in one cluster, so we can combine those numbers
+# thus for each cluster, we calculate the probability a topic is associated with that cluster based only on the reviews about apps in that cluster
+
 cluster_topics = dict()
 
 for cluster in clusters:
     _cluster_topics = dict()
+
+    # get all the reviews for a cluster
     focus_data = review_topic_details[review_topic_details.cluster == cluster]
 
+    # for each topic, sum probabilities of all the reviews w/in this cluster
     topic_p = []
     for topic_id in range(mdl.k):
         topic_p.append(focus_data[f"topic_{topic_id}"].sum())
 
+    # add the final probability for each cluster/topic pair to the dict by dividing the probability for each topic by the total probability for the cluster
+    # thus, the sums for all the topic probabilities across a cluster will sum to 1
     for i, p in enumerate(topic_p):
         _cluster_topics.update({f"topic_{i}": p / sum(topic_p)})
 
@@ -149,6 +116,8 @@ cluster_topics_df
 cluster_topics_df.to_csv(DATA_DIR / f"{MODEL_NAME}_cluster_topic_probabilities.csv")
 
 # %%
+# print the top (highest probability) and save the top 10 reviews for each cluster into a dict
+
 cluster_top_ten_summary = dict()
 
 for i in range(mdl.k):
@@ -223,7 +192,7 @@ for i in tqdm(range(mdl.k)):
 
     _review_data = (
         _review_data.merge(
-            relevant_reviews[["reviewId", "appId", "score"]],
+            relevant_reviews[["reviewId", "appId", "score", "content"]],
             how="left",
             left_on="id",
             right_on="reviewId",
@@ -235,6 +204,8 @@ for i in tqdm(range(mdl.k)):
     top_topic_docs[topic] = _review_data.to_dict(orient="list")
 
 # %%
+# calculate the average review score for each topic, based on the top reviews, as saved in `top_topic_docs`
+
 topic_scores = []
 
 for i in tqdm(range(mdl.k)):
@@ -249,6 +220,8 @@ topic_scores = pd.DataFrame(topic_scores)
 topic_scores.sort_values("topic_score", ascending=False)
 
 # %%
+# print 5 random reviews within a topic from `top_topic_docs` - prints the app that the review is about and the review itself
+
 for topic, reviews in top_topic_docs.items():
     print(f"*************************\n{topic.upper()}")
     review_sample_ids = random.sample(reviews["id"], k=5)
@@ -270,7 +243,13 @@ def topic_sample(
     sample_size: int = 5,
 ) -> list:
     """
-    Returns a sample
+    Returns a sample of reviews for a given topic
+
+    Args:
+        review_source - Panda's dataframe: a dataframe with all of the relevant reviews
+        sample_frame - dict: a dict containing the reviews that you'd like to sample
+        topic_number - int: the topic number that you're sampling
+        sample_size - int: the number of sample reviews that you'd like returned
     """
 
     sample_ids = random.sample(
@@ -290,41 +269,52 @@ for r in range(len(sample_reviews)):
     print(f"+ {sample_reviews.iloc[r, 0]}\n{sample_reviews.iloc[r, 1]}\n")
 
 # %%
+# convert the top_topic_docs dict into a dataframe to make it more amenable to searching
+
+top_topic_docs_df = pd.DataFrame.from_dict(top_topic_docs, orient="index")
+top_topic_docs_df = (
+    top_topic_docs_df.explode(top_topic_docs_df.columns.to_list())
+    .reset_index()
+    .rename(columns={"index": "topic"})
+)
+
+# %%
+# search for a needle in the haystack...
+# looking for a search term (`needle`) within reviews of the top topics
+# this will return a sample of 5 reviews that contain the search term (I think it will throw an error if fewer than 5 reviews contain that term...)
+
 needle = "cry"
 
-haystack = top_topic_docs["content"].str.contains(needle, False)
+haystack = top_topic_docs_df["content"].str.contains(needle, False)
 
 targets = haystack[haystack == True].index.to_list()
 
-for r in top_topic_docs.iloc[targets][["appId", "content"]].sample(5).iterrows():
+for r in top_topic_docs_df.iloc[targets][["appId", "content"]].sample(5).iterrows():
     print(f"+ {r[1][0]}")
     print(r[1][1], "\n")
 
 
 # %%
+# find reviews within a given topic (`topic_num`) of a particular score (`target_score`)
+
 topic_num = "50"
 target_score = 1
 
-review_scan = pd.DataFrame(top_topic_docs[f"topic_{topic_num}"])
-foo = review_scan[review_scan["score"] == target_score]
+scored_topic_reviews = top_topic_docs_df.loc[
+    (top_topic_docs_df["score"] == target_score)
+    & (top_topic_docs_df["topic"] == f"topic_{topic_num}")
+]
 
 # %%
 # visualise a sample of the topics
 sample_count = 10
-(
-    foo.sample(sample_count)
-    .merge(
-        relevant_reviews[["content", "reviewId"]],
-        left_on="id",
-        right_on="reviewId",
-        how="left",
-    )[["appId", "content"]]
-    .to_dict(orient="record")
+
+scored_topic_reviews.sample(sample_count)[["appId", "content"]].to_dict(
+    orient="records"
 )
 
 # %%
 # show the best / worst apps that people are talking about
-foo.groupby("appId").count().sort_values(by="id", ascending=False).head(10)
-
-# %%
-review_scan.groupby("score").count()
+scored_topic_reviews.groupby("appId").count().sort_values(
+    by="id", ascending=False
+).head(10)
