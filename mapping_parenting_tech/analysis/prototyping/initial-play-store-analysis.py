@@ -28,7 +28,7 @@ INPUT_DIR = PROJECT_DIR / "inputs/data/play_store"
 OUTPUT_DIR = PROJECT_DIR / "outputs/data"
 
 # %%
-chunk_size = 10**4
+chunk_size = 10 ** 4
 file = INPUT_DIR / "Google-Playstore.csv"
 file_size = os.path.getsize(file)
 
