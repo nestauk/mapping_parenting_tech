@@ -8,7 +8,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.13.6
+#       jupytext_version: 1.13.7
 #   kernelspec:
 #     display_name: 'Python 3.8.12 64-bit (''mapping_parenting_tech'': conda)'
 #     language: python
@@ -33,7 +33,8 @@
 # ## Do imports and set file locations
 
 # %%
-from mapping_parenting_tech.utils import play_store_utils as psu, logging
+from mapping_parenting_tech import logging
+from mapping_parenting_tech.utils import play_store_utils as psu
 
 # %% [markdown]
 # ## Putting it together

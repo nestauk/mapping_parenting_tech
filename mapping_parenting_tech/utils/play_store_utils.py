@@ -189,8 +189,7 @@ def app_snowball(seed_app_id: str, depth: int = 5, __current_depth: int = 1) -> 
         snowball.update(similar_apps)
     except:
         logging.warning(f"{seed_app_id} had a problem. Maybe it has no related apps.")
-
-    if __current_depth < depth:
+    if (__current_depth < depth) and (similar_apps is not None):
         for this_app in similar_apps:
             snowball.update(app_snowball(this_app, depth, (__current_depth + 1)))
 
