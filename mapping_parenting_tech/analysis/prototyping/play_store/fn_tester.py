@@ -136,5 +136,6 @@ app_list = [
     "com.kitefaster.whitenoise",
     "com.apololo.brightest.flashlight",
 ]
+
 my_app_reviews = psu.load_some_app_reviews(app_list)
 my_app_reviews.shape
