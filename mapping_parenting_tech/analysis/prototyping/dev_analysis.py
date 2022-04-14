@@ -8,7 +8,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.13.7
+#       jupytext_version: 1.13.4
 #   kernelspec:
 #     display_name: 'Python 3.8.12 64-bit (''mapping_parenting_tech'': conda)'
 #     language: python
@@ -104,7 +104,7 @@ dev_df = pd.concat(df_data, axis=1)
 dev_df["av_install_per_app"] = dev_df["dev_installs"] / dev_df["appCount"]
 dev_df["app_by_score"] = (
     dev_df["av_install_per_app"] * dev_df["dev_ratings"]
-) / 10**6
+) / 10 ** 6
 
 # %%
 dev_df[dev_df["dev_ratings"] > 0].sort_values(by=["app_by_score"], ascending=True).head(
