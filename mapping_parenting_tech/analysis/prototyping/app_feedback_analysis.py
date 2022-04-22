@@ -10,7 +10,7 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.13.8
 #   kernelspec:
-#     display_name: 'Python 3.8.12 64-bit (''mapping_parenting_tech'': conda)'
+#     display_name: Python 3 (ipykernel)
 #     language: python
 #     name: python3
 # ---
@@ -39,6 +39,10 @@ OUTPUT_DIR = PROJECT_DIR / "outputs/data"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 # %%
+import mapping_parenting_tech.utils.plotting_utils as pu
+import importlib
+
+# %%
 # get list of relevant ('focus') apps, as identified by automatic and then manual review
 
 focus_apps = pd.read_csv(INPUT_DIR / "relevant_app_ids.csv", header=0)
@@ -60,7 +64,7 @@ app_reviews = app_reviews.merge(focus_apps, on="appId")
 # 3. `score` and `minInstalls` are converted to float and int, respetively
 # 4. `score` is rounded to 1 decimal place
 
-app_details = pd.DataFrame(psu.load_all_app_details()).T
+app_details = pd.DataFrame(psu.load_all_app_details()).T.drop("appId", axis=1)
 logging.info("DataFrame loaded")
 app_details.reset_index(inplace=True)
 app_details.rename(columns={"index": "appId"}, inplace=True)
@@ -68,18 +72,145 @@ app_details = app_details[app_details["appId"].isin(focus_apps_list)]
 app_details = app_details.merge(focus_apps, on="appId")
 app_details = app_details.astype({"score": "float16", "minInstalls": "int64"})
 # app_details.loc[:, "minInstalls"] = app_details["minInstalls"].map('{:,d}'.format)
-app_details["score"] = np.around(app_details["score"].to_list(), 1)
+app_details["score"] = np.around(app_details["score"].to_list(), 2)
 
 # %%
 focus_apps["cluster"].unique().tolist()
 
 # %%
 # add `minInstalls` to apps' reviews
-
 app_reviews = app_reviews.merge(app_details[["appId", "minInstalls"]], on="appId")
 
 # %% [markdown]
+# ## Helper functions
+
+# %%
+check_columns = ["title", "description", "summary", "installs", "score"]
+
+# %%
+cluster_names = [
+    "Drawing and colouring",
+    "Simple puzzles",
+    "Literacy - English / ABCs",
+    "Literacy - English / Reading and Stories",
+    "Literacy - non-English",
+    "Numeracy development",
+    "Learning play",
+    "General play",
+    "Tracking babies' rhythms",
+    "Helping babies to sleep",
+    "Parental support",
+    "Pregnancy tracking",
+    "Fertility tracking",
+    "Baby photos",
+]
+
+clusters_children = [
+    "Drawing and colouring",
+    "Simple puzzles",
+    "Literacy - English / ABCs",
+    "Literacy - English / Reading and Stories",
+    "Literacy - non-English",
+    "Numeracy development",
+    "Learning play",
+    "General play",
+]
+
+clusters_parents = [
+    "Tracking babies' rhythms",
+    "Helping babies to sleep",
+    "Parental support",
+    "Pregnancy tracking",
+    "Fertility tracking",
+    "Baby photos",
+]
+
+clusters_literacy = [
+    "Literacy - English / ABCs",
+    "Literacy - English / Reading and Stories",
+    "Literacy - non-English",
+]
+
+clusters_simple = [
+    "Drawing and colouring",
+    "Simple puzzles",
+]
+
+clusters_play = [
+    "Learning play",
+    "General play",
+]
+
+cluster_to_user_dict = dict(
+    zip(
+        clusters_parents + clusters_children,
+        ["Parents"] * len(clusters_parents) + ["Children"] * len(clusters_children),
+    )
+)
+
+
+def map_cluster_to_user(cluster: str) -> str:
+    return cluster_to_user_dict[cluster]
+
+
+def get_top_cluster_apps(
+    app_df: pd.DataFrame, cluster: str, sort_by: str = "minInstalls", top_n: int = 10
+) -> pd.DataFrame:
+    """Show top apps in a specified cluster"""
+    return (
+        app_df.query("cluster == @cluster")
+        .sort_values(sort_by, ascending=False)
+        .head(top_n)
+    )
+
+
+def percentage_in_cluster(
+    app_df: pd.DataFrame, cluster_names, return_percent: bool = True
+) -> float:
+    """Show percentage of all apps that are in specified clusters"""
+    n = app_df.cluster.isin(cluster_names).sum()
+    if return_percent:
+        return np.round(n / len(app_df) * 100, 1)
+    else:
+        return n
+
+
+def install_labels(number: float):
+    if number < 1000:
+        return f"{number: .0f}"
+    if (number >= 1000) and (number < 1e6):
+        return f"{number / 1000: .0f}K"
+    if (number >= 1e6) and (number < 1e9):
+        return f"{number / 1e+6: .0f}M"
+    if number >= 1e9:
+        return f"{number / 1e+9: .0f}B"
+
+
+# %% [markdown]
 # ## Some basic insights into the apps
+
+# %% [markdown]
+# ### DfE apps (reference)
+
+# %%
+dfe_apps = [
+    "com.phonicshero.phonicshero",
+    "com.fishinabottle.navigo",
+    "com.auristech.fonetti",
+    "com.lingumi.lingumiplay",
+    "com.learnandgo.kaligo.homemena",
+    "com.teachyourmonstertoread.tmapp",
+]
+
+# %%
+# df = pd.DataFrame(psu.load_all_app_details()).T.reset_index()
+# df.query("@dfe_apps in index")
+
+# %%
+app_details.query("@dfe_apps in appId")[check_columns]
+
+# %%
+app_details.groupby("country_code").agg(counts=("appId", "count"))
 
 # %% [markdown]
 # ### Popularity and scores
@@ -96,6 +227,83 @@ plot_df.sort_values("app_count", ascending=False).plot.bar(
 )
 
 # %%
+# Check the total number of apps
+n_total = plot_df.app_count.sum()
+n_total
+
+# %%
+# Apps for children
+percentage_in_cluster(app_details, clusters_children, False), percentage_in_cluster(
+    app_details, clusters_children
+)
+
+# %%
+# Apps for parents
+percentage_in_cluster(app_details, clusters_parents, False), percentage_in_cluster(
+    app_details, clusters_parents
+)
+
+# %%
+# Ratio children vs parents
+percentage_in_cluster(app_details, clusters_children, False) / percentage_in_cluster(
+    app_details, clusters_parents, False
+)
+
+# %%
+# Apps for literacy
+p = percentage_in_cluster(app_details, clusters_literacy)
+n = percentage_in_cluster(app_details, clusters_literacy, False)
+n, p
+
+# %%
+p = percentage_in_cluster(app_details, ["Numeracy development"])
+n = percentage_in_cluster(app_details, ["Numeracy development"], False)
+n, p
+
+# %%
+(241 + 79) / 896
+
+# %%
+p = percentage_in_cluster(app_details, clusters_play)
+n = percentage_in_cluster(app_details, clusters_play, False)
+n, p
+
+# %%
+506 / 896
+
+# %%
+p = percentage_in_cluster(app_details, clusters_simple)
+n = percentage_in_cluster(app_details, clusters_simple, False)
+n, p
+
+# %%
+70 / 896
+
+# %%
+get_top_cluster_apps(app_details, "Literacy - English / ABCs", top_n=5)
+
+# %%
+get_top_cluster_apps(app_details, "Literacy - English / Reading and Stories", top_n=5)
+
+# %%
+get_top_cluster_apps(app_details, "Numeracy development", top_n=5)
+
+# %%
+get_top_cluster_apps(app_details, "Learning play", top_n=20)
+
+# %%
+# get_top_cluster_apps(app_details, 'Drawing and colouring', 'score', 100)
+
+# %%
+app_details["minInstalls"].median()
+
+# %%
+len(app_details.query("minInstalls > 1e+6"))
+
+# %%
+154 / len(app_details)
+
+# %%
 # group by minInstalls and then
 # 1. count how many apps have been installed that many (`minInstall`) times
 # 2. get the average score for the apps that have been installed that many times
@@ -103,6 +311,101 @@ plot_df.sort_values("app_count", ascending=False).plot.bar(
 app_installs_df = app_details.groupby("minInstalls").agg(
     installCount=("minInstalls", "count"), av_score=("score", "mean")
 )
+
+# %%
+app_installs_df_["total_installs"] = (
+    app_installs_df_["minInstalls"] * app_installs_df_["minInstalls"]
+)
+
+# %%
+n = app_details.minInstalls.sort_values()
+percentage_of_installs = np.cumsum(n)[1:] / np.sum(n) * 100
+percentage_of_apps = (np.array(range(1, len(n), 1)) / len(n)) * 100
+
+df = pd.DataFrame(
+    data={
+        "percentage_of_apps": percentage_of_apps,
+        "percentage_of_installs": percentage_of_installs,
+    }
+)
+
+(
+    alt.Chart(df)
+    .mark_line(color="blue")
+    .encode(
+        alt.Y("percentage_of_apps:Q"),
+        alt.X("percentage_of_installs:Q"),
+        tooltip=["percentage_of_apps", "percentage_of_installs"],
+    )
+).interactive()
+
+# %%
+df[df.percentage_of_installs >= 50].head(3)
+
+# %%
+df[df.percentage_of_installs >= 20].head(3)
+
+# %%
+n = app_details.sort_values("minInstalls", ascending=False).head(36).minInstalls.sum()
+n / app_details.minInstalls.sum()
+
+# %%
+app_details.sort_values("minInstalls", ascending=False).head(10)[
+    check_columns + ["cluster"]
+]
+
+# %%
+app_details.groupby("cluster").agg(total_installs=("minInstalls", "sum")).sort_values(
+    "total_installs"
+) / 1e6
+
+# %%
+app_details.groupby("cluster").agg(total_installs=("minInstalls", "mean")).sort_values(
+    "total_installs"
+) / 1e6
+
+# %%
+app_installs_df_ = app_installs_df.reset_index()
+
+# %%
+app_installs_df_.query("minInstalls > 1e+6").installCount.sum()
+
+# %%
+app_installs_df_.query("minInstalls > 1e+6").installCount.sum() / len(app_details)
+
+# %%
+1 / 0.128
+
+# %%
+# importlib.reload(pu)
+# pu.bar_chart(
+#     data = (
+#         app_installs_df.reset_index()
+#         .assign(minInstalls=lambda x: x.minInstalls.apply(lambda y: str(y)))
+#     ),
+#     values_column = 'installCount',
+#     labels_column = 'minInstalls',
+#     values_title = "Number of apps",
+#     labels_title = "Installations",
+#     tooltip = None,
+#     color = None,
+#     chart_title = '',
+#     chart_subtitle = '',
+# )
+
+# %%
+# (
+#     alt.Chart(
+#         app_installs_df.reset_index().assign(minInstalls=lambda x: x.minInstalls.apply(lambda y: str(y))),
+#         width=400,
+#         height=300,
+#     )
+#     .mark_bar(color='blue')
+#     .encode(
+#         alt.X('installCount:Q'),
+#         alt.Y('minInstalls:O')
+#     )
+# )
 
 # %%
 base = alt.Chart(app_installs_df.reset_index(), width=700, height=700).encode(
@@ -170,7 +473,60 @@ fig
 
 
 # %% [markdown]
+# ## Example apps
+
+# %%
+cluster_name = "Parental support"
+# cluster_name = 'Literacy - English / ABCs'
+
+# %%
+get_top_cluster_apps(app_details, cluster_name)[check_columns]
+
+# %%
+get_top_cluster_apps(app_details, cluster_name, "score")[
+    ["title", "description", "summary", "installs", "score"]
+]
+
+# %%
+get_top_cluster_apps(app_details, "Literacy - English / Reading and Stories")[
+    check_columns
+]
+
+# %%
+app_details.sort_values("minInstalls", ascending=False)[
+    check_columns + ["cluster"]
+].head(15)
+
+# %% [markdown]
 # ## Comparisons with Play Store
+
+# %%
+list(app_details.columns)
+
+# %%
+# Import Google Play Store data
+google_playstore_df = pd.read_csv(INPUT_DIR / "Google-Playstore.csv")
+
+# %%
+google_playstore_df = google_playstore_df.rename(
+    columns={
+        "App Id": "appId",
+        "Minimum Installs": "minInstalls",
+        "Free": "free",
+        "In App Purchases": "offersIAP",
+    }
+)
+
+# %%
+for col in ["free", "Ad Supported", "offersIAP"]:
+    print(col, google_playstore_df[col].mean())
+
+# %%
+for col in ["free", "Ad Supported", "offersIAP"]:
+    print(
+        col,
+        google_playstore_df[google_playstore_df["minInstalls"] > 100000][col].mean(),
+    )
 
 # %%
 # Load the number of apps in each category on the Play Store
@@ -261,8 +617,6 @@ fig.show()
 
 
 # %%
-
-# %%
 plot_df = (
     app_details.loc[app_details.score > 0]
     .groupby("cluster")
@@ -288,6 +642,61 @@ plot_df
 # ### Apps' average scores by cluster
 
 # %%
+app_details.score.plot.hist()
+
+# %%
+app_details.query("score > 0").score.median()
+
+# %%
+app_details.query("score > 0").score.mean()
+
+# %%
+1 - len(app_details.query("score <= 0")) / len(app_details)
+
+# %%
+app_details.score.median()
+
+# %%
+app_details.query("score > 0").groupby("cluster").agg(
+    score=("score", "mean")
+).sort_values("score", ascending=False)
+
+# %%
+stripplot = (
+    alt.Chart(app_details, width=40)
+    .mark_circle(size=8)
+    .encode(
+        x=alt.X(
+            "jitter:Q",
+            title=None,
+            axis=alt.Axis(values=[0], ticks=True, grid=False, labels=False),
+            scale=alt.Scale(),
+        ),
+        y=alt.Y("score:Q"),
+        color=alt.Color("cluster:N", legend=None),
+        column=alt.Column(
+            "cluster:N",
+            header=alt.Header(
+                labelAngle=-90,
+                titleOrient="top",
+                labelOrient="bottom",
+                labelAlign="right",
+                labelPadding=3,
+            ),
+        ),
+    )
+    .transform_calculate(
+        # Generate Gaussian jitter with a Box-Muller transform
+        jitter="sqrt(-2*log(random()))*cos(2*PI*random())"
+    )
+    .configure_facet(spacing=0)
+    .configure_view(stroke=None)
+)
+
+stripplot
+
+# %%
+importlib.reload(pu)
 plt_column = "score"
 bars = (
     alt.Chart(
@@ -314,6 +723,35 @@ error_bars = (
     )
 )
 bars + error_bars
+
+# %%
+# importlib.reload(pu)
+# plt_column = "score"
+# bars = (
+#     alt.Chart(
+#         app_details[app_details.score > 0].sort_values(plt_column, ascending=True),
+#         width=700,
+#         height=400,
+#     )
+#     .mark_bar()
+#     .encode(
+#         y=alt.Y(f"mean({plt_column}):Q", scale=alt.Scale(zero=True)),
+#         x=alt.X(
+#             "cluster:N",
+#             sort=alt.EncodingSortField(field=f"mean({plt_column})", order="ascending"),
+#         ),
+#         color="cluster",
+#     )
+# )
+
+# error_bars = (
+#     alt.Chart(app_details[app_details.score > 0])
+#     .mark_errorbar(extent="stdev")
+#     .encode(
+#         y=alt.Y(f"{plt_column}:Q", scale=alt.Scale(zero=False)), x=alt.X("cluster:N")
+#     )
+# )
+# bars + error_bars
 
 # %%
 fig = (
@@ -535,7 +973,17 @@ basic_app_details = app_details[
         "containsAds",
         "offersIAP",
     ]
-]
+].copy()
+basic_app_details["user"] = basic_app_details.cluster.apply(map_cluster_to_user)
+
+# %%
+(
+    basic_app_details.groupby("user").agg(
+        free=("free", "mean"),
+        containsAds=("containsAds", "mean"),
+        offersIAP=("offersIAP", "mean"),
+    )
+)
 
 # %%
 plotter = (
@@ -612,12 +1060,516 @@ print("Mean ads:", df.ads_pc.mean())
 print("Mean IAPs:", df.IAPs_pc.mean())
 
 # %%
-df
+df_ads = df.copy().assign(user=lambda x: x.cluster.apply(map_cluster_to_user))
+df_ads
+
+# %%
+df_ads.groupby("user").mean()
+
+# %%
+df_ads.sort_values(["user", "ads_pc"], ascending=False)
+
+# %%
+df_ads.sort_values(["user", "IAPs_pc"], ascending=False)
+
+# %% [markdown]
+# ### Compare add percentage with a baseline percentage
+
+# %%
+app_details.info()
+
+# %%
+google_playstore_df.info()
+
+# %%
+app_installs_vs_ads_df = (
+    app_details.assign(user=lambda x: x.cluster.apply(map_cluster_to_user))
+    .query("user == 'Parents'")
+    .groupby("minInstalls")
+    .agg(
+        # installCount=("minInstalls", "count"),
+        # av_score=("score", "mean"),
+        free=("free", "mean"),
+        inapp=("offersIAP", "mean"),
+        # ads=("containsAds", "mean"),
+    )
+)
+
+app_installs_vs_ads_baseline = google_playstore_df.groupby("Minimum Installs").agg(
+    # installCount=("Minimum Installs", "count"),
+    # av_score=("Rating", "mean"),
+    free_baseline=("Free", "mean"),
+    inapp_baseline=("In App Purchases", "mean"),
+    # ads=("containsAds", "mean"),
+)
+
+# %%
+app_installs_vs_ads_df
+
+# %%
+app_installs_vs_ads_ = pd.concat(
+    [app_installs_vs_ads_df, app_installs_vs_ads_baseline], axis=1
+)
+
+# %%
+app_installs_vs_ads_.reset_index()
+
+
+# %%
+# df_ads.sort_values(['user', 'ads_pc'], ascending=False)
+
+# %% [markdown]
+# ## Trends
+
+# %%
+### Time series trends
+def moving_average(
+    timeseries_df: pd.DataFrame, window: int = 3, replace_columns: bool = False
+) -> pd.DataFrame:
+    """
+    Calculates rolling mean of yearly timeseries (not centered)
+    Args:
+        timeseries_df: Should have a 'year' column and at least one other data column
+        window: Window of the rolling mean
+        rename_cols: If True, will create new set of columns for the moving average
+            values with the name pattern `{column_name}_sma{window}` where sma
+            stands for 'simple moving average'; otherwise this will replace the original columns
+    Returns:
+        Dataframe with moving average values
+    """
+    # Rolling mean
+    df_ma = timeseries_df.rolling(window, min_periods=1).mean().drop("year", axis=1)
+    # Create new renamed columns
+    if not replace_columns:
+        column_names = timeseries_df.drop("year", axis=1).columns
+        new_column_names = ["{}_sma{}".format(s, window) for s in column_names]
+        df_ma = df_ma.rename(columns=dict(zip(column_names, new_column_names)))
+        return pd.concat([timeseries_df, df_ma], axis=1)
+    else:
+        return pd.concat([timeseries_df[["year"]], df_ma], axis=1)
+
+
+def magnitude(time_series: pd.DataFrame, year_start: int, year_end: int) -> pd.Series:
+    """
+    Calculates signals' magnitude (i.e. mean across year_start and year_end)
+    Args:
+        time_series: A dataframe with a columns for 'year' and other data
+        year_start: First year of the trend window
+        year_end: Last year of the trend window
+    Returns:
+        Series with magnitude estimates for all data columns
+    """
+    magnitude = time_series.set_index("year").loc[year_start:year_end, :].mean()
+    return magnitude
+
+
+def percentage_change(initial_value, new_value):
+    """Calculates percentage change from first_value to second_value"""
+    return (new_value - initial_value) / initial_value * 100
+
+
+def growth(
+    time_series: pd.DataFrame,
+    year_start: int,
+    year_end: int,
+) -> pd.Series:
+    """Calculates a growth estimate
+    Args:
+        time_series: A dataframe with a columns for 'year' and other data
+        year_start: First year of the trend window
+        year_end: Last year of the trend window
+    Returns:
+        Series with smoothed growth estimates for all data columns
+    """
+    # Smooth timeseries
+    df = time_series.set_index("year")
+    # Percentage change
+    return percentage_change(
+        initial_value=df.loc[year_start, :], new_value=df.loc[year_end, :]
+    )
+
+
+def smoothed_growth(
+    time_series: pd.DataFrame, year_start: int, year_end: int, window: int = 3
+) -> pd.Series:
+    """Calculates a growth estimate by using smoothed (rolling mean) time series
+    Args:
+        time_series: A dataframe with a columns for 'year' and other data
+        year_start: First year of the trend window
+        year_end: Last year of the trend window
+        window: Moving average windows size (in years) for the smoothed growth estimate
+    Returns:
+        Series with smoothed growth estimates for all data columns
+    """
+    # Smooth timeseries
+    ma_df = moving_average(time_series, window, replace_columns=True).set_index("year")
+    # Percentage change
+    return percentage_change(
+        initial_value=ma_df.loc[year_start, :], new_value=ma_df.loc[year_end, :]
+    )
+
+
+def estimate_magnitude_growth(
+    time_series: pd.DataFrame, year_start: int, year_end: int, window: int = 3
+) -> pd.DataFrame:
+    """
+    Calculates signals' magnitude, estimates their growth and returns a combined dataframe
+    Args:
+        time_series: A dataframe with a columns for 'year' and other data
+        year_start: First year of the trend window
+        year_end: Last year of the trend window
+        window: Moving average windows size (in years) for the smoothed growth estimate
+    Returns:
+        Dataframe with magnitude and growth trend estimates; magnitude is in
+        absolute units (e.g. GBP 1000s if analysing research funding) whereas
+        growth is expresed as a percentage
+    """
+    magnitude_df = magnitude(time_series, year_start, year_end)
+    growth_df = smoothed_growth(time_series, year_start, year_end, window)
+    combined_df = (
+        pd.DataFrame([magnitude_df, growth_df], index=["magnitude", "growth"])
+        .reset_index()
+        .rename(columns={"index": "trend"})
+    )
+    return combined_df
+
+
+def impute_empty_periods(
+    df_time_period: pd.DataFrame,
+    time_period_col: str,
+    period: str,
+    min_year: int,
+    max_year: int,
+) -> pd.DataFrame:
+    """
+    Imputes zero values for time periods without data
+    Args:
+        df_time_period: A dataframe with a column containing time period data
+        time_period_col: Column containing time period data
+        period: Time period that the data is grouped by, 'M', 'Q' or 'Y'
+        min_year: Earliest year to impute values for
+        max_year: Last year to impute values for
+    Returns:
+        A dataframe with imputed 0s for time periods with no data
+    """
+    max_year_data = np.nan_to_num(df_time_period[time_period_col].max().year)
+    max_year = max(max_year_data, max_year)
+    full_period_range = (
+        pd.period_range(
+            f"01/01/{min_year}",
+            f"31/12/{max_year}",
+            freq=period,
+        )
+        .to_timestamp()
+        .to_frame(index=False, name=time_period_col)
+        .reset_index(drop=True)
+    )
+    return full_period_range.merge(df_time_period, "left").fillna(0)
+
+
+def minInstalls_coarse_partition(number: float):
+    if number < 100e3:
+        return "<100K"
+    if (number >= 100e3) and (number < 1e6):
+        return "100K-1M"
+    if number > 1e6:
+        return "1M+"
+
+
+# %%
+app_install_categories = ["<100K", "100K-1M", "1M+"]
+
+# %% [markdown]
+# ### Trends: App development trends
+
+# %% [markdown]
+# #### "Baseline"
+
+# %%
+google_playstore_df.minInstalls.median()
+
+# %%
+google_playstore_df.query('Category== "Parenting"').minInstalls.median()
+
+# %%
+google_playstore_df.query('Category== "Education"').minInstalls.median()
+
+# %%
+google_playstore_df.query('Category== "Educational"').minInstalls.median()
 
 # %%
 # Extract the year that each app was released and place in a separate column
 # app_details["released"] = pd.to_datetime(app_details["released"])
 app_details["releaseYear"] = pd.to_datetime(app_details["released"]).dt.year
+app_details["user"] = app_details.cluster.apply(map_cluster_to_user)
+
+# %%
+new_apps_per_year_baseline = (
+    google_playstore_df[-google_playstore_df.Released.isnull()]
+    .assign(releaseYear=lambda x: x.Released.apply(lambda x: int(x[-4:])))
+    # .query("Category == 'Education'")
+    .groupby("releaseYear")
+    .agg(counts=("appId", "count"))
+    .reset_index()
+    .query("releaseYear < 2021")
+)
+
+# %%
+# sorted(google_playstore_df.Category.unique())
+
+# %%
+(
+    alt.Chart(new_apps_per_year_baseline)
+    .mark_line()
+    .encode(
+        x="releaseYear:O",
+        y="counts",
+    )
+)
+
+# %%
+new_apps_per_year_baseline.pct_change()
+
+# %%
+new_apps_per_year_per_install_baseline = (
+    google_playstore_df[-google_playstore_df.Released.isnull()]
+    .assign(releaseYear=lambda x: x.Released.apply(lambda x: int(x[-4:])))
+    .assign(minInstalls=lambda x: x.minInstalls.apply(minInstalls_coarse_partition))
+    # .assign(minInstalls = lambda x: x.minInstalls.apply(lambda y: np.log10(y)))
+    .groupby(["releaseYear", "minInstalls"])
+    .agg(counts=("appId", "count"))
+    .query("releaseYear < 2021")
+    .reset_index()
+)
+
+# %%
+(
+    alt.Chart(new_apps_per_year_per_install_baseline)
+    .mark_line()
+    .encode(
+        x="releaseYear",
+        y="counts",
+        color="minInstalls",
+    )
+)
+
+# %%
+baseline_pct_change = []
+for cat in app_install_categories:
+    baseline_pct_change.append(
+        new_apps_per_year_per_install_baseline.query(f"minInstalls == '{cat}'")
+        .rename(columns={"releaseYear": "year"})
+        .sort_values("year")
+        .drop("minInstalls", axis=1)
+        .assign(pct_change=lambda x: (x.pct_change().counts) * 100)
+        .assign(minInstalls=cat)
+        .assign(sample="Play Store")
+    )
+baseline_pct_change = pd.concat(baseline_pct_change, ignore_index=True)
+
+# %%
+(
+    alt.Chart(baseline_pct_change)
+    .mark_line()
+    .encode(
+        x="year",
+        y="pct_change",
+        color="minInstalls",
+    )
+)
+
+# %%
+# Short term growth (baseline)
+result_dict = {}
+for i in app_install_categories:
+    df_ = (
+        new_apps_per_year_per_install_baseline.query(f"minInstalls == '{i}'")
+        .sort_values("releaseYear")
+        .rename(columns={"releaseYear": "year"})
+        .drop("minInstalls", axis=1)
+    )
+    result_dict[i] = growth(df_, year_start=2019, year_end=2020)
+
+
+# %%
+result_dict
+
+# %%
+# Short term growth (baseline)
+result_dict = {}
+for i in app_install_categories:
+    df_ = (
+        new_apps_per_year_per_install_baseline.query(f"minInstalls == '{i}'")
+        .sort_values("releaseYear")
+        .rename(columns={"releaseYear": "year"})
+        .drop("minInstalls", axis=1)
+    )
+    result_dict[i] = smoothed_growth(df_, year_start=2016, year_end=2020)
+
+
+# %%
+result_dict
+
+# %% [markdown]
+# #### Our sample: Overall app development across years
+
+# %%
+new_apps_per_year_all = (
+    app_details.groupby(["releaseYear"]).agg(counts=("appId", "count"))
+    # .query('releaseYear < 2021')
+    .reset_index()
+)
+
+(
+    alt.Chart(new_apps_per_year_all)
+    .mark_line()
+    .encode(
+        x="releaseYear:O",
+        y="counts",
+    )
+)
+
+# %%
+new_apps_per_year = (
+    app_details.groupby(["releaseYear", "user"])
+    .agg(counts=("appId", "count"))
+    .reset_index()
+)
+
+(
+    alt.Chart(new_apps_per_year)
+    .mark_line()
+    .encode(
+        x="releaseYear",
+        y="counts",
+        color="user",
+    )
+)
+
+# %%
+new_apps_per_year = (
+    app_details.assign(
+        minInstalls=lambda x: x.minInstalls.apply(minInstalls_coarse_partition)
+    )
+    .groupby(["releaseYear", "minInstalls"])
+    .agg(counts=("appId", "count"))
+    .reset_index()
+)
+
+(
+    alt.Chart(new_apps_per_year)
+    .mark_line()
+    .encode(
+        x="releaseYear",
+        y="counts",
+        color="minInstalls",
+    )
+)
+
+# %%
+apps_pct_change = []
+for cat in app_install_categories:
+    apps_pct_change.append(
+        new_apps_per_year.query(f"minInstalls == '{cat}'")
+        .rename(columns={"releaseYear": "year"})
+        .sort_values("year")
+        .query("year < 2021")
+        .drop("minInstalls", axis=1)
+        .assign(pct_change=lambda x: (x.pct_change().counts) * 100)
+        .assign(minInstalls=cat)
+        .assign(sample="ours")
+    )
+apps_pct_change = pd.concat(apps_pct_change, ignore_index=True)
+
+# %%
+(
+    alt.Chart(apps_pct_change)
+    .mark_line()
+    .encode(
+        x="year",
+        y="pct_change",
+        color="minInstalls",
+    )
+)
+
+# %%
+pct_chage = pd.concat([baseline_pct_change, apps_pct_change], ignore_index=True).query(
+    "minInstalls == '100K-1M'"
+)
+
+(
+    alt.Chart(pct_chage)
+    .mark_bar()
+    .encode(
+        # x='year:O',
+        x="sample",
+        y="pct_change",
+        column="year",
+        color="sample",
+    )
+)
+
+# %%
+# Short term growth (baseline)
+result_dict = {}
+for i in app_install_categories:
+    df_ = (
+        new_apps_per_year.query(f"minInstalls == '{i}'")
+        .sort_values("releaseYear")
+        .rename(columns={"releaseYear": "year"})
+        .drop("minInstalls", axis=1)
+    )
+    result_dict[i] = growth(df_, year_start=2019, year_end=2020)
+
+
+# %%
+result_dict
+
+# %%
+# Short term growth (baseline)
+result_dict = {}
+for i in app_install_categories:
+    df_ = (
+        new_apps_per_year.query(f"minInstalls == '{i}'")
+        .sort_values("releaseYear")
+        .rename(columns={"releaseYear": "year"})
+        .drop("minInstalls", axis=1)
+    )
+    result_dict[i] = smoothed_growth(df_, year_start=2016, year_end=2020)
+
+
+# %%
+result_dict
+
+# %% [markdown]
+# #### Total pool of apps by users
+
+# %%
+user = "Children"
+total_apps_per_yer_per_user = []
+for user in ["Children", "Parents"]:
+    total_apps_per_yer_per_user.append(
+        app_details.groupby(["releaseYear", "user"])
+        .agg(counts=("appId", "count"))
+        .reset_index()
+        .query("user == @user")
+        .assign(counts_sum=lambda x: x.cumsum().counts)
+    )
+total_apps_per_yer_per_user = pd.concat(total_apps_per_yer_per_user, ignore_index=True)
+
+# %%
+(
+    alt.Chart(total_apps_per_yer_per_user)
+    .mark_line()
+    .encode(
+        x="releaseYear",
+        y="counts_sum",
+        color="user",
+    )
+)
+
+# %% [markdown]
+# #### App development trends by clusters
 
 # %%
 app_growth = app_details.groupby(["releaseYear", "cluster"], as_index=False).agg(
@@ -627,7 +1579,7 @@ app_growth.sort_values(by=["releaseYear"], inplace=True, ignore_index=True)
 app_growth["growth"] = app_growth["app_count"].pct_change()
 # app_growth[app_growth.cluster == "Parental support"]
 # app_growth["growth"].mean()
-app_growth.plot.bar(x="releaseYear", y="growth", figsize=(10, 7))
+# app_growth.plot.bar(x="releaseYear", y="growth", figsize=(10, 7))
 
 # %%
 app_growth["app_count"].sum()
@@ -638,30 +1590,386 @@ app_growth.groupby("cluster").agg(average_growth=("growth", "mean")).sort_values
 )
 
 # %%
-cluster_size_by_year = (
-    app_details.groupby(by=["cluster", "releaseYear"])["appId"]
-    .count()
-    .cumsum()
+new_apps_per_year_per_cluster = (
+    app_details.groupby(["releaseYear", "cluster", "user"]).agg(
+        counts=("appId", "count")
+    )
+    # .query('releaseYear < 2021')
     .reset_index()
 )
-cluster_size_by_year.rename(columns={"appId": "app_count"}, inplace=True)
-cluster_size_by_year["normalised"] = cluster_size_by_year[
-    "app_count"
-] / cluster_size_by_year.groupby("cluster")["app_count"].transform("max")
-cluster_size_by_year
 
 # %%
 fig = (
-    alt.Chart(cluster_size_by_year, width=700, height=700)
+    alt.Chart(new_apps_per_year_per_cluster, width=700, height=700)
     .mark_line()
     .encode(
-        x="releaseYear:N",
-        y="app_count:Q",
+        x="releaseYear:O",
+        y="counts:Q",
         color="cluster:N",
         tooltip=["cluster"],
     )
 )
 fig
+
+# %%
+# Short term growth (baseline)
+result_dict = {}
+for i in cluster_names:
+    df_ = (
+        new_apps_per_year_per_cluster[["releaseYear", "cluster", "counts"]]
+        .query(f"cluster == @i")
+        .drop("cluster", axis=1)
+        .sort_values("releaseYear")
+        .rename(columns={"releaseYear": "year"})
+    )
+    result_dict[i] = growth(df_, year_start=2019, year_end=2020)
+pd.DataFrame(result_dict).T.reset_index().sort_values(
+    "counts"
+)  # .assign(cluster=lambda x: x.index.apply(map_cluster_to_user))
+
+# %%
+# Short term growth (baseline)
+result_dict = {}
+for i in cluster_names:
+    df_ = (
+        new_apps_per_year_per_cluster[["releaseYear", "cluster", "counts"]]
+        .query(f"cluster == @i")
+        .drop("cluster", axis=1)
+        .sort_values("releaseYear")
+        .rename(columns={"releaseYear": "year"})
+        .assign(year=lambda x: pd.to_datetime(x.year.apply(lambda y: str(int(y)))))
+        .pipe(
+            impute_empty_periods,
+            time_period_col="year",
+            period="Y",
+            min_year=2010,
+            max_year=2021,
+        )
+        .assign(year=lambda x: x.year.dt.year)
+    )
+    result_dict[i] = smoothed_growth(df_, year_start=2017, year_end=2021)
+pd.DataFrame(result_dict).T.reset_index().sort_values(
+    "counts"
+)  # .assign(cluster=lambda x: x.index.apply(map_cluster_to_user))
+
+# %%
+cluster_sizes_per_year = []
+for cluster in cluster_names:
+    cluster_sizes_per_year.append(
+        new_apps_per_year_per_cluster.query(f"cluster == @cluster").assign(
+            counts_sum=lambda x: x.cumsum().counts
+        )
+    )
+cluster_sizes_per_year = pd.concat(cluster_sizes_per_year, ignore_index=True)
+
+# %%
+fig = (
+    alt.Chart(cluster_sizes_per_year, width=700, height=700)
+    .mark_line()
+    .encode(
+        x="releaseYear:O",
+        y="counts_sum:Q",
+        color="cluster:N",
+        tooltip=["cluster"],
+    )
+)
+fig
+
+# %%
+# Short term growth (baseline)
+result_dict = {}
+for i in cluster_names:
+    df_ = (
+        cluster_sizes_per_year[["releaseYear", "cluster", "counts"]]
+        .query(f"cluster == @i")
+        .drop("cluster", axis=1)
+        .sort_values("releaseYear")
+        .rename(columns={"releaseYear": "year"})
+        .assign(year=lambda x: pd.to_datetime(x.year.apply(lambda y: str(int(y)))))
+        .pipe(
+            impute_empty_periods,
+            time_period_col="year",
+            period="Y",
+            min_year=2010,
+            max_year=2021,
+        )
+        .assign(year=lambda x: x.year.dt.year)
+    )
+    result_dict[i] = smoothed_growth(df_, year_start=2016, year_end=2020)
+pd.DataFrame(result_dict).T.reset_index().sort_values(
+    "counts"
+)  # .assign(cluster=lambda x: x.index.apply(map_cluster_to_user))
+
+# %%
+# Short term growth (baseline)
+result_dict = {}
+for i in cluster_names:
+    df_ = (
+        cluster_sizes_per_year[["releaseYear", "cluster", "counts_sum"]]
+        .query(f"cluster == @i")
+        .drop("cluster", axis=1)
+        .sort_values("releaseYear")
+        .rename(columns={"releaseYear": "year"})
+    )
+    result_dict[i] = growth(df_, year_start=2019, year_end=2020)
+pd.DataFrame(result_dict).T.reset_index().sort_values(
+    "counts_sum"
+)  # .assign(cluster=lambda x: x.index.apply(map_cluster_to_user))
+
+# %%
+# Short term growth (baseline)
+result_dict = {}
+for i in cluster_names:
+    df_ = (
+        cluster_sizes_per_year[["releaseYear", "cluster", "counts_sum"]]
+        .query(f"cluster == @i")
+        .drop("cluster", axis=1)
+        .sort_values("releaseYear")
+        .rename(columns={"releaseYear": "year"})
+        .assign(year=lambda x: pd.to_datetime(x.year.apply(lambda y: str(int(y)))))
+        .pipe(
+            impute_empty_periods,
+            time_period_col="year",
+            period="Y",
+            min_year=2010,
+            max_year=2021,
+        )
+        .assign(year=lambda x: x.year.dt.year)
+    )
+    result_dict[i] = smoothed_growth(df_, year_start=2017, year_end=2021)
+cluster_sizes_long_term = (
+    pd.DataFrame(result_dict)
+    .T.reset_index()
+    .sort_values("counts_sum")
+    .rename(columns={"index": "cluster"})
+)  # .assign(cluster=lambda x: x.index.apply(map_cluster_to_user))
+cluster_sizes_long_term
+
+# %%
+size_vs_growth = cluster_sizes_long_term.merge(
+    app_details.groupby("cluster").agg(app_counts=("appId", "count")).reset_index()
+)
+size_vs_growth
+
+# %%
+fig = (
+    alt.Chart(size_vs_growth, width=600, height=550)
+    .mark_circle()
+    .encode(
+        x=alt.X(
+            "app_counts:Q",
+            # axis=alt.Axis(title=f"Number of reviews in {end_year}"),
+            # scale=alt.Scale(type="linear"),
+        ),
+        y=alt.Y(
+            "counts_sum:Q",
+            # axis=alt.Axis(
+            #     title=f"Growth between {start_year} and {end_year} measured by number of reviews"
+            # ),
+            # scale=alt.Scale(type="linear"),
+        ),
+        # size="cluster_size:Q",
+        color="cluster:N",
+        tooltip="cluster:N",
+    )
+)
+fig
+
+# %%
+# cluster_size_by_year = (
+#     app_details.groupby(by=["cluster", "releaseYear"])["appId"]
+#     .count()
+#     .cumsum()
+#     .reset_index()
+# )
+# cluster_size_by_year.rename(columns={"appId": "app_count"}, inplace=True)
+# cluster_size_by_year["normalised"] = cluster_size_by_year[
+#     "app_count"
+# ] / cluster_size_by_year.groupby("cluster")["app_count"].transform("max")
+# cluster_size_by_year
+
+# %%
+# fig = (
+#     alt.Chart(cluster_size_by_year, width=700, height=700)
+#     .mark_line()
+#     .encode(
+#         x="releaseYear:N",
+#         y="app_count:Q",
+#         color="cluster:N",
+#         tooltip=["cluster"],
+#     )
+# )
+# fig
+
+# %% [markdown]
+# ### Review growth by years
+
+# %%
+review_growth_by_user = (
+    app_reviews[app_reviews.reviewYear < 2022]
+    .assign(user=lambda x: x.cluster.apply(map_cluster_to_user))
+    .groupby(["user", "reviewYear"], as_index=False)
+    .agg(
+        review_count=("reviewId", "count"),
+    )
+)
+
+# %%
+fig = (
+    alt.Chart(review_growth_by_user)
+    .mark_line()
+    .encode(
+        x="reviewYear:O",
+        y="review_count:Q",
+        color="user:N",
+    )
+)
+fig
+
+# %%
+review_growth = (
+    app_reviews[app_reviews.reviewYear < 2022]
+    # .assign(user=lambda x: x.cluster.apply(map_cluster_to_user))
+    .groupby(["cluster", "reviewYear"], as_index=False).agg(
+        review_count=("reviewId", "count"),
+    )
+)
+
+# %%
+fig = (
+    alt.Chart(review_growth, width=700, height=700)
+    .mark_line()
+    .encode(
+        x="reviewYear:O",
+        y="review_count:Q",
+        color="cluster:N",
+        tooltip=["cluster"],
+    )
+)
+fig
+
+# %%
+# Short term growth (baseline)
+result_dict = {}
+for i in cluster_names:
+    df_ = (
+        review_growth[["reviewYear", "cluster", "review_count"]]
+        .query(f"cluster == @i")
+        .drop("cluster", axis=1)
+        .sort_values("reviewYear")
+        .rename(columns={"reviewYear": "year"})
+    )
+    result_dict[i] = growth(df_, year_start=2019, year_end=2020)
+pd.DataFrame(result_dict).T.reset_index().sort_values(
+    "review_count"
+)  # .assign(cluster=lambda x: x.index.apply(map_cluster_to_user))
+
+# %%
+# Short term growth (baseline)
+result_dict = {}
+smoothed_dfs = []
+for i in cluster_names:
+    df_ = (
+        review_growth[["reviewYear", "cluster", "review_count"]]
+        .query(f"cluster == @i")
+        .drop("cluster", axis=1)
+        .sort_values("reviewYear")
+        .rename(columns={"reviewYear": "year"})
+        .assign(year=lambda x: pd.to_datetime(x.year.apply(lambda y: str(int(y)))))
+        .pipe(
+            impute_empty_periods,
+            time_period_col="year",
+            period="Y",
+            min_year=2010,
+            max_year=2021,
+        )
+        .assign(year=lambda x: x.year.dt.year)
+    )
+    smoothed_dfs.append(moving_average(df_, replace_columns=True).assign(cluster=i))
+    result_dict[i] = smoothed_growth(df_, year_start=2016, year_end=2020)
+cluster_sizes_long_term = (
+    pd.DataFrame(result_dict)
+    .T.reset_index()
+    .sort_values("review_count")
+    .rename(
+        columns={
+            "index": "cluster",
+            "review_count": "growth",
+        }
+    )
+)  # .assign(cluster=lambda x: x.index.apply(map_cluster_to_user))
+cluster_sizes_long_term
+
+# %%
+app_review_counts_by_cluster = (
+    app_reviews.groupby(["cluster", "reviewYear"])
+    .agg(review_count=("reviewId", "count"))
+    .reset_index()
+)
+results_dict = dict()
+for cluster in cluster_names:
+    result_dict[cluster] = (
+        app_review_counts_by_cluster.query("cluster == @cluster")
+        .rename(columns={"reviewYear": "year"})
+        .pipe(magnitude, 2017, 2021)
+    )
+cluster_magnitude = (
+    pd.DataFrame(result_dict)
+    .T.reset_index()
+    .sort_values("review_count")
+    .rename(columns={"index": "cluster"})
+)
+cluster_magnitude
+
+# %%
+review_growth_vs_magnitude = cluster_magnitude.merge(cluster_sizes_long_term).query(
+    'cluster != "Parental support"'
+)
+review_growth_vs_magnitude
+
+# %%
+fig = (
+    alt.Chart(review_growth_vs_magnitude)  # , width=600, height=550)
+    .mark_circle()
+    .encode(
+        x=alt.X(
+            "review_count:Q",
+            # axis=alt.Axis(title=f"Number of reviews in {end_year}"),
+            # scale=alt.Scale(type="linear"),
+        ),
+        y=alt.Y(
+            "growth:Q",
+            # axis=alt.Axis(
+            #     title=f"Growth between {start_year} and {end_year} measured by number of reviews"
+            # ),
+            # scale=alt.Scale(type="linear"),
+        ),
+        # size="cluster_size:Q",
+        color="cluster:N",
+        tooltip="cluster:N",
+    )
+)
+fig
+
+# %%
+review_growth_smooth = pd.concat(smoothed_dfs, ignore_index=True)
+
+fig = (
+    alt.Chart(review_growth_smooth, width=700, height=700)
+    .mark_line()
+    .encode(
+        x="year:O",
+        y="review_count:Q",
+        color="cluster:N",
+        tooltip=["cluster"],
+    )
+)
+fig
+
+# %%
+
+# %%
+# app_reviews.query("reviewYear == 2021")
 
 # %%
 review_growth = (
@@ -792,3 +2100,5 @@ growth_summary = review_growth_by_app.groupby("cluster").agg(
 )
 
 growth_summary
+
+# %%

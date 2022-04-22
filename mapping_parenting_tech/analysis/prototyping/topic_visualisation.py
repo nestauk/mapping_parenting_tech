@@ -10,7 +10,7 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.13.8
 #   kernelspec:
-#     display_name: Python 3.8.0 ('mapping_parenting_tech')
+#     display_name: Python 3 (ipykernel)
 #     language: python
 #     name: python3
 # ---
@@ -107,10 +107,18 @@ details = details.merge(
 # get the index of those apps that aren't relevant
 remove_apps = details[details["cluster"].isna()].index
 
+# %% [markdown]
+# ## Plot embeddings
+
 # %%
 # Load the existing embeddings of the app descriptions
-with open(OUTPUT_DIR / "description_embeddings-22-01-21.pickle", "rb") as f:
+filename = "description_embeddings-22-01-21.pickle"
+filename = "description_embeddings-22-04-19.pickle"
+with open(OUTPUT_DIR / filename, "rb") as f:
     description_embeddings = pickle.load(f)
+
+# %%
+description_embeddings.shape
 
 # %%
 # remove 'irrelevant' apps from the dataframe and the embedding
