@@ -1277,13 +1277,134 @@ def minInstalls_coarse_partition(number: float):
 
 
 # %%
+def result_dict_to_dataframe(
+    result_dict: dict, sort_by: str = "counts", category_name: str = "cluster"
+) -> pd.DataFrame:
+    """Prepares the output dataframe"""
+    return (
+        pd.DataFrame(result_dict)
+        .T.reset_index()
+        .sort_values(sort_by)
+        .rename(columns={"index": category_name})
+    )
+
+
+def get_category_time_series(
+    time_series_df: pd.DataFrame,
+    category_of_interest: str,
+    time_column: str = "releaseYear",
+    category_column: str = "cluster",
+) -> dict:
+    """Gets cluster or user-specific time series"""
+    return (
+        time_series_df.query(f"{category_column} == @category_of_interest")
+        .drop(category_column, axis=1)
+        .sort_values(time_column)
+        .rename(columns={time_column: "year"})
+        .assign(year=lambda x: pd.to_datetime(x.year.apply(lambda y: str(int(y)))))
+        .pipe(
+            impute_empty_periods,
+            time_period_col="year",
+            period="Y",
+            min_year=2010,
+            max_year=2021,
+        )
+        .assign(year=lambda x: x.year.dt.year)
+    )
+
+
+def get_estimates(
+    time_series_df: pd.DataFrame,
+    value_column: str = "counts",
+    time_column: str = "releaseYear",
+    category_column: str = "cluster",
+    estimate_function=growth,
+    year_start: int = 2019,
+    year_end: int = 2020,
+):
+    """
+    Get growth estimate for each category
+
+    growth_estimate_function - either growth, smoothed_growth, or magnitude
+    For growth, use 2019 and 2020 as year_start and year_end
+    For smoothed_growth and magnitude, use 2017 and 2021
+    """
+    time_series_df_ = time_series_df[[time_column, category_column, value_column]]
+
+    result_dict = {
+        category: estimate_function(
+            get_category_time_series(
+                time_series_df_, category, time_column, category_column
+            ),
+            year_start=year_start,
+            year_end=year_end,
+        )
+        for category in time_series_df[category_column].unique()
+    }
+    return result_dict_to_dataframe(result_dict, value_column, category_column)
+
+
+def get_magnitude_vs_growth(
+    time_series_df: pd.DataFrame,
+    value_column: str = "counts",
+    time_column: str = "releaseYear",
+    category_column: str = "cluster",
+):
+    """Get magnitude vs growth esitmates"""
+    df_growth = get_estimates(
+        time_series_df,
+        value_column=value_column,
+        time_column=time_column,
+        category_column=category_column,
+        estimate_function=smoothed_growth,
+        year_start=2017,
+        year_end=2021,
+    ).rename(columns={value_column: "Growth"})
+
+    df_magnitude = get_estimates(
+        time_series_df,
+        value_column=value_column,
+        time_column=time_column,
+        category_column=category_column,
+        estimate_function=magnitude,
+        year_start=2017,
+        year_end=2021,
+    ).rename(columns={value_column: "Magnitude"})
+
+    return df_growth.merge(df_magnitude, on="cluster")
+
+
+def get_smoothed_timeseries(
+    time_series_df: pd.DataFrame,
+    value_column: str = "counts",
+    time_column: str = "releaseYear",
+    category_column: str = "cluster",
+):
+    """TODO: Finish this one!"""
+    time_series_df_ = time_series_df[[time_column, category_column, value_column]]
+
+    return pd.concat(
+        [
+            moving_average(
+                get_category_time_series(
+                    time_series_df_, category, time_column, category_column
+                ),
+                replace_columns=True,
+            )
+            for category in time_series_df[category_column].unique()
+        ],
+        ignore_index=True,
+    )
+
+
+# %%
 app_install_categories = ["<100K", "100K-1M", "1M+"]
 
 # %% [markdown]
 # ### Trends: App development trends
 
 # %% [markdown]
-# #### "Baseline"
+# #### App dev trends: "Baseline" sample of all playstore
 
 # %%
 google_playstore_df.minInstalls.median()
@@ -1411,7 +1532,7 @@ for i in app_install_categories:
 result_dict
 
 # %% [markdown]
-# #### Our sample: Overall app development across years
+# #### App development trends: Big picture
 
 # %%
 new_apps_per_year_all = (
@@ -1427,6 +1548,11 @@ new_apps_per_year_all = (
         x="releaseYear:O",
         y="counts",
     )
+)
+
+# %%
+get_magnitude_vs_growth(
+    new_apps_per_year_all.assign(cluster="all"),
 )
 
 # %%
@@ -1542,7 +1668,7 @@ for i in app_install_categories:
 result_dict
 
 # %% [markdown]
-# #### Total pool of apps by users
+# #### App dev trends: Cumulative size by user
 
 # %%
 user = "Children"
@@ -1569,32 +1695,31 @@ total_apps_per_yer_per_user = pd.concat(total_apps_per_yer_per_user, ignore_inde
 )
 
 # %% [markdown]
-# #### App development trends by clusters
+# #### App development trends: Clusters dynamics
 
 # %%
-app_growth = app_details.groupby(["releaseYear", "cluster"], as_index=False).agg(
-    app_count=("appId", "count")
-)
-app_growth.sort_values(by=["releaseYear"], inplace=True, ignore_index=True)
-app_growth["growth"] = app_growth["app_count"].pct_change()
-# app_growth[app_growth.cluster == "Parental support"]
-# app_growth["growth"].mean()
-# app_growth.plot.bar(x="releaseYear", y="growth", figsize=(10, 7))
+# app_growth = app_details.groupby(["releaseYear", "cluster"], as_index=False).agg(
+#     app_count=("appId", "count")
+# )
+# app_growth.sort_values(by=["releaseYear"], inplace=True, ignore_index=True)
+# app_growth["growth"] = app_growth["app_count"].pct_change()
+# # app_growth[app_growth.cluster == "Parental support"]
+# # app_growth["growth"].mean()
+# # app_growth.plot.bar(x="releaseYear", y="growth", figsize=(10, 7))
 
 # %%
-app_growth["app_count"].sum()
+# app_growth["app_count"].sum()
 
 # %%
-app_growth.groupby("cluster").agg(average_growth=("growth", "mean")).sort_values(
-    "average_growth"
-)
+# app_growth.groupby("cluster").agg(average_growth=("growth", "mean")).sort_values(
+#     "average_growth"
+# )
 
 # %%
+# New apps per year, for each cluster
 new_apps_per_year_per_cluster = (
-    app_details.groupby(["releaseYear", "cluster", "user"]).agg(
-        counts=("appId", "count")
-    )
-    # .query('releaseYear < 2021')
+    app_details.groupby(["releaseYear", "cluster", "user"])
+    .agg(counts=("appId", "count"))
     .reset_index()
 )
 
@@ -1612,47 +1737,84 @@ fig = (
 fig
 
 # %%
-# Short term growth (baseline)
-result_dict = {}
-for i in cluster_names:
-    df_ = (
-        new_apps_per_year_per_cluster[["releaseYear", "cluster", "counts"]]
-        .query(f"cluster == @i")
-        .drop("cluster", axis=1)
-        .sort_values("releaseYear")
-        .rename(columns={"releaseYear": "year"})
-    )
-    result_dict[i] = growth(df_, year_start=2019, year_end=2020)
-pd.DataFrame(result_dict).T.reset_index().sort_values(
-    "counts"
-)  # .assign(cluster=lambda x: x.index.apply(map_cluster_to_user))
+# Short term trend (2019 -> 2020)
+df_short = get_estimates(
+    new_apps_per_year_per_cluster,
+    value_column="counts",
+    time_column="releaseYear",
+    category_column="cluster",
+    estimate_function=growth,
+    year_start=2019,
+    year_end=2020,
+)
+df_short
 
 # %%
-# Short term growth (baseline)
-result_dict = {}
-for i in cluster_names:
-    df_ = (
-        new_apps_per_year_per_cluster[["releaseYear", "cluster", "counts"]]
-        .query(f"cluster == @i")
-        .drop("cluster", axis=1)
-        .sort_values("releaseYear")
-        .rename(columns={"releaseYear": "year"})
-        .assign(year=lambda x: pd.to_datetime(x.year.apply(lambda y: str(int(y)))))
-        .pipe(
-            impute_empty_periods,
-            time_period_col="year",
-            period="Y",
-            min_year=2010,
-            max_year=2021,
-        )
-        .assign(year=lambda x: x.year.dt.year)
-    )
-    result_dict[i] = smoothed_growth(df_, year_start=2017, year_end=2021)
-pd.DataFrame(result_dict).T.reset_index().sort_values(
-    "counts"
-)  # .assign(cluster=lambda x: x.index.apply(map_cluster_to_user))
+# Short term trend (2020 -> 2021)
+df_short = get_estimates(
+    new_apps_per_year_per_cluster,
+    value_column="counts",
+    time_column="releaseYear",
+    category_column="cluster",
+    estimate_function=growth,
+    year_start=2020,
+    year_end=2021,
+)
+df_short
 
 # %%
+# Longer term, smoothed trend (2017 -> 2021)
+df_long = get_estimates(
+    new_apps_per_year_per_cluster,
+    value_column="counts",
+    time_column="releaseYear",
+    category_column="cluster",
+    estimate_function=smoothed_growth,
+    year_start=2017,
+    year_end=2021,
+)
+df_long
+
+# %%
+new_apps_magnitude_vs_growth = get_magnitude_vs_growth(
+    new_apps_per_year_per_cluster,
+    value_column="counts",
+    time_column="releaseYear",
+    category_column="cluster",
+)
+
+# %%
+fig = (
+    alt.Chart(new_apps_magnitude_vs_growth, width=600, height=550)
+    .mark_circle(size=50)
+    .encode(
+        x=alt.X(
+            "Magnitude:Q",
+            # axis=alt.Axis(title=f"Number of reviews in {end_year}"),
+            # scale=alt.Scale(type="linear"),
+        ),
+        y=alt.Y(
+            "Growth:Q",
+            # axis=alt.Axis(
+            #     title=f"Growth between {start_year} and {end_year} measured by number of reviews"
+            # ),
+            # scale=alt.Scale(type="linear"),
+        ),
+        # size="cluster_size:Q",
+        color="cluster:N",
+        tooltip="cluster:N",
+    )
+)
+
+text = fig.mark_text(align="left", baseline="middle", dx=7).encode(text="cluster")
+
+fig + text
+
+# %% [markdown]
+# #### App development trends: Cumulative cluster size
+
+# %%
+# Cumulative cluster size dynamic
 cluster_sizes_per_year = []
 for cluster in cluster_names:
     cluster_sizes_per_year.append(
@@ -1676,74 +1838,15 @@ fig = (
 fig
 
 # %%
-# Short term growth (baseline)
-result_dict = {}
-for i in cluster_names:
-    df_ = (
-        cluster_sizes_per_year[["releaseYear", "cluster", "counts"]]
-        .query(f"cluster == @i")
-        .drop("cluster", axis=1)
-        .sort_values("releaseYear")
-        .rename(columns={"releaseYear": "year"})
-        .assign(year=lambda x: pd.to_datetime(x.year.apply(lambda y: str(int(y)))))
-        .pipe(
-            impute_empty_periods,
-            time_period_col="year",
-            period="Y",
-            min_year=2010,
-            max_year=2021,
-        )
-        .assign(year=lambda x: x.year.dt.year)
-    )
-    result_dict[i] = smoothed_growth(df_, year_start=2016, year_end=2020)
-pd.DataFrame(result_dict).T.reset_index().sort_values(
-    "counts"
-)  # .assign(cluster=lambda x: x.index.apply(map_cluster_to_user))
-
-# %%
-# Short term growth (baseline)
-result_dict = {}
-for i in cluster_names:
-    df_ = (
-        cluster_sizes_per_year[["releaseYear", "cluster", "counts_sum"]]
-        .query(f"cluster == @i")
-        .drop("cluster", axis=1)
-        .sort_values("releaseYear")
-        .rename(columns={"releaseYear": "year"})
-    )
-    result_dict[i] = growth(df_, year_start=2019, year_end=2020)
-pd.DataFrame(result_dict).T.reset_index().sort_values(
-    "counts_sum"
-)  # .assign(cluster=lambda x: x.index.apply(map_cluster_to_user))
-
-# %%
-# Short term growth (baseline)
-result_dict = {}
-for i in cluster_names:
-    df_ = (
-        cluster_sizes_per_year[["releaseYear", "cluster", "counts_sum"]]
-        .query(f"cluster == @i")
-        .drop("cluster", axis=1)
-        .sort_values("releaseYear")
-        .rename(columns={"releaseYear": "year"})
-        .assign(year=lambda x: pd.to_datetime(x.year.apply(lambda y: str(int(y)))))
-        .pipe(
-            impute_empty_periods,
-            time_period_col="year",
-            period="Y",
-            min_year=2010,
-            max_year=2021,
-        )
-        .assign(year=lambda x: x.year.dt.year)
-    )
-    result_dict[i] = smoothed_growth(df_, year_start=2017, year_end=2021)
-cluster_sizes_long_term = (
-    pd.DataFrame(result_dict)
-    .T.reset_index()
-    .sort_values("counts_sum")
-    .rename(columns={"index": "cluster"})
-)  # .assign(cluster=lambda x: x.index.apply(map_cluster_to_user))
-cluster_sizes_long_term
+get_growth_estimates(
+    cluster_sizes_per_year,
+    value_column="counts_sum",
+    time_column="releaseYear",
+    category_column="cluster",
+    growth_estimate_function=smoothed_growth,
+    year_start=2017,
+    year_end=2021,
+)
 
 # %%
 size_vs_growth = cluster_sizes_long_term.merge(
@@ -1752,28 +1855,28 @@ size_vs_growth = cluster_sizes_long_term.merge(
 size_vs_growth
 
 # %%
-fig = (
-    alt.Chart(size_vs_growth, width=600, height=550)
-    .mark_circle()
-    .encode(
-        x=alt.X(
-            "app_counts:Q",
-            # axis=alt.Axis(title=f"Number of reviews in {end_year}"),
-            # scale=alt.Scale(type="linear"),
-        ),
-        y=alt.Y(
-            "counts_sum:Q",
-            # axis=alt.Axis(
-            #     title=f"Growth between {start_year} and {end_year} measured by number of reviews"
-            # ),
-            # scale=alt.Scale(type="linear"),
-        ),
-        # size="cluster_size:Q",
-        color="cluster:N",
-        tooltip="cluster:N",
-    )
-)
-fig
+# fig = (
+#     alt.Chart(size_vs_growth, width=600, height=550)
+#     .mark_circle()
+#     .encode(
+#         x=alt.X(
+#             "app_counts:Q",
+#             # axis=alt.Axis(title=f"Number of reviews in {end_year}"),
+#             # scale=alt.Scale(type="linear"),
+#         ),
+#         y=alt.Y(
+#             "counts_sum:Q",
+#             # axis=alt.Axis(
+#             #     title=f"Growth between {start_year} and {end_year} measured by number of reviews"
+#             # ),
+#             # scale=alt.Scale(type="linear"),
+#         ),
+#         # size="cluster_size:Q",
+#         color="cluster:N",
+#         tooltip="cluster:N",
+#     )
+# )
+# fig
 
 # %%
 # cluster_size_by_year = (
@@ -1805,8 +1908,33 @@ fig
 # ### Review growth by years
 
 # %%
+app_reviews_dedup = app_reviews.drop_duplicates("reviewId")
+
+# %%
+yearly_app_reviews_all = app_reviews_dedup.groupby("reviewYear", as_index=False).agg(
+    review_count=("reviewId", "count")
+)
+
+# %%
+get_magnitude_vs_growth(
+    yearly_app_reviews_all.assign(cluster="all"),
+    value_column="review_count",
+    time_column="reviewYear",
+)
+
+# %%
+get_estimates(
+    yearly_app_reviews_all.assign(cluster="all"),
+    value_column="review_count",
+    time_column="reviewYear",
+    estimate_function=growth,
+    year_start=2020,
+    year_end=2021,
+)
+
+# %%
 review_growth_by_user = (
-    app_reviews[app_reviews.reviewYear < 2022]
+    app_reviews_dedup[app_reviews_dedup.reviewYear < 2022]
     .assign(user=lambda x: x.cluster.apply(map_cluster_to_user))
     .groupby(["user", "reviewYear"], as_index=False)
     .agg(
@@ -1827,17 +1955,17 @@ fig = (
 fig
 
 # %%
-review_growth = (
-    app_reviews[app_reviews.reviewYear < 2022]
-    # .assign(user=lambda x: x.cluster.apply(map_cluster_to_user))
-    .groupby(["cluster", "reviewYear"], as_index=False).agg(
+review_growth_by_cluster = (
+    app_reviews_dedup[app_reviews_dedup.reviewYear < 2022]
+    .groupby(["cluster", "reviewYear"], as_index=False)
+    .agg(
         review_count=("reviewId", "count"),
     )
 )
 
 # %%
 fig = (
-    alt.Chart(review_growth, width=700, height=700)
+    alt.Chart(review_growth_by_cluster, width=700, height=700)
     .mark_line()
     .encode(
         x="reviewYear:O",
@@ -1849,96 +1977,52 @@ fig = (
 fig
 
 # %%
-# Short term growth (baseline)
-result_dict = {}
-for i in cluster_names:
-    df_ = (
-        review_growth[["reviewYear", "cluster", "review_count"]]
-        .query(f"cluster == @i")
-        .drop("cluster", axis=1)
-        .sort_values("reviewYear")
-        .rename(columns={"reviewYear": "year"})
-    )
-    result_dict[i] = growth(df_, year_start=2019, year_end=2020)
-pd.DataFrame(result_dict).T.reset_index().sort_values(
-    "review_count"
-)  # .assign(cluster=lambda x: x.index.apply(map_cluster_to_user))
+# Short term trend (2019 -> 2020)
+df_short = get_estimates(
+    review_growth_by_cluster,
+    value_column="review_count",
+    time_column="reviewYear",
+    category_column="cluster",
+    estimate_function=growth,
+    year_start=2019,
+    year_end=2020,
+)
+df_short
 
 # %%
-# Short term growth (baseline)
-result_dict = {}
-smoothed_dfs = []
-for i in cluster_names:
-    df_ = (
-        review_growth[["reviewYear", "cluster", "review_count"]]
-        .query(f"cluster == @i")
-        .drop("cluster", axis=1)
-        .sort_values("reviewYear")
-        .rename(columns={"reviewYear": "year"})
-        .assign(year=lambda x: pd.to_datetime(x.year.apply(lambda y: str(int(y)))))
-        .pipe(
-            impute_empty_periods,
-            time_period_col="year",
-            period="Y",
-            min_year=2010,
-            max_year=2021,
-        )
-        .assign(year=lambda x: x.year.dt.year)
-    )
-    smoothed_dfs.append(moving_average(df_, replace_columns=True).assign(cluster=i))
-    result_dict[i] = smoothed_growth(df_, year_start=2016, year_end=2020)
-cluster_sizes_long_term = (
-    pd.DataFrame(result_dict)
-    .T.reset_index()
-    .sort_values("review_count")
-    .rename(
-        columns={
-            "index": "cluster",
-            "review_count": "growth",
-        }
-    )
-)  # .assign(cluster=lambda x: x.index.apply(map_cluster_to_user))
-cluster_sizes_long_term
+# Short term trend (2020 -> 2021)
+df_short = get_estimates(
+    review_growth_by_cluster,
+    value_column="review_count",
+    time_column="reviewYear",
+    category_column="cluster",
+    estimate_function=growth,
+    year_start=2020,
+    year_end=2021,
+)
+df_short
 
 # %%
-app_review_counts_by_cluster = (
-    app_reviews.groupby(["cluster", "reviewYear"])
-    .agg(review_count=("reviewId", "count"))
-    .reset_index()
+reviews_magnitude_vs_growth = get_magnitude_vs_growth(
+    review_growth_by_cluster,
+    value_column="review_count",
+    time_column="reviewYear",
+    category_column="cluster",
 )
-results_dict = dict()
-for cluster in cluster_names:
-    result_dict[cluster] = (
-        app_review_counts_by_cluster.query("cluster == @cluster")
-        .rename(columns={"reviewYear": "year"})
-        .pipe(magnitude, 2017, 2021)
-    )
-cluster_magnitude = (
-    pd.DataFrame(result_dict)
-    .T.reset_index()
-    .sort_values("review_count")
-    .rename(columns={"index": "cluster"})
-)
-cluster_magnitude
-
-# %%
-review_growth_vs_magnitude = cluster_magnitude.merge(cluster_sizes_long_term).query(
-    'cluster != "Parental support"'
-)
-review_growth_vs_magnitude
+reviews_magnitude_vs_growth
 
 # %%
 fig = (
-    alt.Chart(review_growth_vs_magnitude)  # , width=600, height=550)
-    .mark_circle()
+    alt.Chart(reviews_magnitude_vs_growth, width=600, height=550)
+    .mark_circle(size=50)
     .encode(
         x=alt.X(
-            "review_count:Q",
+            "Magnitude:Q",
             # axis=alt.Axis(title=f"Number of reviews in {end_year}"),
             # scale=alt.Scale(type="linear"),
         ),
         y=alt.Y(
-            "growth:Q",
+            "Growth:Q",
             # axis=alt.Axis(
             #     title=f"Growth between {start_year} and {end_year} measured by number of reviews"
             # ),
@@ -1949,7 +2033,10 @@ fig = (
         tooltip="cluster:N",
     )
 )
-fig
+
+text = fig.mark_text(align="left", baseline="middle", dx=7).encode(text="cluster")
+
+fig + text
 
 # %%
 review_growth_smooth = pd.concat(smoothed_dfs, ignore_index=True)
@@ -1967,9 +2054,10 @@ fig = (
 fig
 
 # %%
-
-# %%
 # app_reviews.query("reviewYear == 2021")
+
+# %% [markdown]
+# ### Below: Mat's plots
 
 # %%
 review_growth = (
