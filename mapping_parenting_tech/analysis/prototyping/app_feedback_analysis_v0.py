@@ -49,8 +49,6 @@ AltairSaver = alt_save.AltairSaver()
 
 # %%
 app_details = utils.get_app_details()
-
-# %%
 app_reviews = utils.get_app_reviews()
 
 # %%
@@ -130,63 +128,26 @@ check_columns = ["title", "description", "summary", "installs", "score"]
 # %% [markdown]
 # ## Basic insights into the apps
 
-# %%
-# Check the total number of apps
-n_total = len(app_details)
-n_total
+# %% [markdown]
+# ### DfE apps (reference)
 
 # %%
-# Apps for children
-print(utils.percentage_in_cluster(app_details, utils.clusters_children, False))
-print(utils.percentage_in_cluster(app_details, utils.clusters_children))
+dfe_apps = [
+    "com.phonicshero.phonicshero",
+    "com.fishinabottle.navigo",
+    "com.auristech.fonetti",
+    "com.lingumi.lingumiplay",
+    "com.learnandgo.kaligo.homemena",
+    "com.teachyourmonstertoread.tmapp",
+]
 
 # %%
-# Apps for parents
-print(utils.percentage_in_cluster(app_details, utils.clusters_parents, False))
-print(utils.percentage_in_cluster(app_details, utils.clusters_parents))
-
-# %%
-# Ratio children vs parents
-percentage_in_cluster(app_details, clusters_children, False) / percentage_in_cluster(
-    app_details, clusters_parents, False
-)
-
-# %%
-# Apps for literacy
-p = percentage_in_cluster(app_details, clusters_literacy)
-n = percentage_in_cluster(app_details, clusters_literacy, False)
-n, p
-
-# %%
-p = percentage_in_cluster(app_details, ["Numeracy development"])
-n = percentage_in_cluster(app_details, ["Numeracy development"], False)
-n, p
-
-# %%
-(241 + 79) / 896
-
-# %%
-p = percentage_in_cluster(app_details, clusters_play)
-n = percentage_in_cluster(app_details, clusters_play, False)
-n, p
-
-# %%
-506 / 896
-
-# %%
-p = percentage_in_cluster(app_details, clusters_simple)
-n = percentage_in_cluster(app_details, clusters_simple, False)
-n, p
-
-# %%
-70 / 896
+app_details.query("@dfe_apps in appId")[check_columns]
 
 # %% [markdown]
-# <!-- ### Popularity and scores
+# ### Popularity and scores
 # How much are apps downloaded and do highly downloaded apps have better scores?
-# The initial figures are derived from apps' details - i.e., their `minInstalls` count, and their score, all grouped by cluster and averaged accordingly. -->
-
-# %%
+# The initial figures are derived from apps' details - i.e., their `minInstalls` count, and their score, all grouped by cluster and averaged accordingly.
 
 # %%
 users_to_plot = ["Children"]
@@ -261,6 +222,57 @@ utils.save_data_table(app_counts, table_name)
 AltairSaver.save(fig, table_name, filetypes=["html", "png"])
 
 # %%
+# Check the total number of apps
+n_total = len(app_details)
+n_total
+
+# %%
+# Apps for children
+print(utils.percentage_in_cluster(app_details, utils.clusters_children, False))
+print(utils.percentage_in_cluster(app_details, utils.clusters_children))
+
+# %%
+# Apps for parents
+print(utils.percentage_in_cluster(app_details, utils.clusters_parents, False))
+print(utils.percentage_in_cluster(app_details, utils.clusters_parents))
+
+# %%
+# Ratio children vs parents
+percentage_in_cluster(app_details, clusters_children, False) / percentage_in_cluster(
+    app_details, clusters_parents, False
+)
+
+# %%
+# Apps for literacy
+p = percentage_in_cluster(app_details, clusters_literacy)
+n = percentage_in_cluster(app_details, clusters_literacy, False)
+n, p
+
+# %%
+p = percentage_in_cluster(app_details, ["Numeracy development"])
+n = percentage_in_cluster(app_details, ["Numeracy development"], False)
+n, p
+
+# %%
+(241 + 79) / 896
+
+# %%
+p = percentage_in_cluster(app_details, clusters_play)
+n = percentage_in_cluster(app_details, clusters_play, False)
+n, p
+
+# %%
+506 / 896
+
+# %%
+p = percentage_in_cluster(app_details, clusters_simple)
+n = percentage_in_cluster(app_details, clusters_simple, False)
+n, p
+
+# %%
+70 / 896
+
+# %%
 get_top_cluster_apps(app_details, "Literacy - English / ABCs", top_n=5)
 
 # %%
@@ -271,22 +283,6 @@ get_top_cluster_apps(app_details, "Numeracy development", top_n=5)
 
 # %%
 get_top_cluster_apps(app_details, "Learning play", top_n=20)
-
-# %% [markdown]
-# ### DfE apps (reference)
-
-# %%
-dfe_apps = [
-    "com.phonicshero.phonicshero",
-    "com.fishinabottle.navigo",
-    "com.auristech.fonetti",
-    "com.lingumi.lingumiplay",
-    "com.learnandgo.kaligo.homemena",
-    "com.teachyourmonstertoread.tmapp",
-]
-
-# %%
-app_details.query("@dfe_apps in appId")[check_columns]
 
 # %%
 # get_top_cluster_apps(app_details, 'Drawing and colouring', 'score', 100)
@@ -1111,11 +1107,291 @@ app_installs_vs_ads_ = pd.concat(
 # %%
 app_installs_vs_ads_.reset_index()
 
+
 # %%
 # df_ads.sort_values(['user', 'ads_pc'], ascending=False)
 
 # %% [markdown]
 # ## Trends
+
+# %%
+### Time series trends
+def moving_average(
+    timeseries_df: pd.DataFrame, window: int = 3, replace_columns: bool = False
+) -> pd.DataFrame:
+    """
+    Calculates rolling mean of yearly timeseries (not centered)
+    Args:
+        timeseries_df: Should have a 'year' column and at least one other data column
+        window: Window of the rolling mean
+        rename_cols: If True, will create new set of columns for the moving average
+            values with the name pattern `{column_name}_sma{window}` where sma
+            stands for 'simple moving average'; otherwise this will replace the original columns
+    Returns:
+        Dataframe with moving average values
+    """
+    # Rolling mean
+    df_ma = timeseries_df.rolling(window, min_periods=1).mean().drop("year", axis=1)
+    # Create new renamed columns
+    if not replace_columns:
+        column_names = timeseries_df.drop("year", axis=1).columns
+        new_column_names = ["{}_sma{}".format(s, window) for s in column_names]
+        df_ma = df_ma.rename(columns=dict(zip(column_names, new_column_names)))
+        return pd.concat([timeseries_df, df_ma], axis=1)
+    else:
+        return pd.concat([timeseries_df[["year"]], df_ma], axis=1)
+
+
+def magnitude(time_series: pd.DataFrame, year_start: int, year_end: int) -> pd.Series:
+    """
+    Calculates signals' magnitude (i.e. mean across year_start and year_end)
+    Args:
+        time_series: A dataframe with a columns for 'year' and other data
+        year_start: First year of the trend window
+        year_end: Last year of the trend window
+    Returns:
+        Series with magnitude estimates for all data columns
+    """
+    magnitude = time_series.set_index("year").loc[year_start:year_end, :].mean()
+    return magnitude
+
+
+def percentage_change(initial_value, new_value):
+    """Calculates percentage change from first_value to second_value"""
+    return (new_value - initial_value) / initial_value * 100
+
+
+def growth(
+    time_series: pd.DataFrame,
+    year_start: int,
+    year_end: int,
+) -> pd.Series:
+    """Calculates a growth estimate
+    Args:
+        time_series: A dataframe with a columns for 'year' and other data
+        year_start: First year of the trend window
+        year_end: Last year of the trend window
+    Returns:
+        Series with smoothed growth estimates for all data columns
+    """
+    # Smooth timeseries
+    df = time_series.set_index("year")
+    # Percentage change
+    return percentage_change(
+        initial_value=df.loc[year_start, :], new_value=df.loc[year_end, :]
+    )
+
+
+def smoothed_growth(
+    time_series: pd.DataFrame, year_start: int, year_end: int, window: int = 3
+) -> pd.Series:
+    """Calculates a growth estimate by using smoothed (rolling mean) time series
+    Args:
+        time_series: A dataframe with a columns for 'year' and other data
+        year_start: First year of the trend window
+        year_end: Last year of the trend window
+        window: Moving average windows size (in years) for the smoothed growth estimate
+    Returns:
+        Series with smoothed growth estimates for all data columns
+    """
+    # Smooth timeseries
+    ma_df = moving_average(time_series, window, replace_columns=True).set_index("year")
+    # Percentage change
+    return percentage_change(
+        initial_value=ma_df.loc[year_start, :], new_value=ma_df.loc[year_end, :]
+    )
+
+
+def estimate_magnitude_growth(
+    time_series: pd.DataFrame, year_start: int, year_end: int, window: int = 3
+) -> pd.DataFrame:
+    """
+    Calculates signals' magnitude, estimates their growth and returns a combined dataframe
+    Args:
+        time_series: A dataframe with a columns for 'year' and other data
+        year_start: First year of the trend window
+        year_end: Last year of the trend window
+        window: Moving average windows size (in years) for the smoothed growth estimate
+    Returns:
+        Dataframe with magnitude and growth trend estimates; magnitude is in
+        absolute units (e.g. GBP 1000s if analysing research funding) whereas
+        growth is expresed as a percentage
+    """
+    magnitude_df = magnitude(time_series, year_start, year_end)
+    growth_df = smoothed_growth(time_series, year_start, year_end, window)
+    combined_df = (
+        pd.DataFrame([magnitude_df, growth_df], index=["magnitude", "growth"])
+        .reset_index()
+        .rename(columns={"index": "trend"})
+    )
+    return combined_df
+
+
+def impute_empty_periods(
+    df_time_period: pd.DataFrame,
+    time_period_col: str,
+    period: str,
+    min_year: int,
+    max_year: int,
+) -> pd.DataFrame:
+    """
+    Imputes zero values for time periods without data
+    Args:
+        df_time_period: A dataframe with a column containing time period data
+        time_period_col: Column containing time period data
+        period: Time period that the data is grouped by, 'M', 'Q' or 'Y'
+        min_year: Earliest year to impute values for
+        max_year: Last year to impute values for
+    Returns:
+        A dataframe with imputed 0s for time periods with no data
+    """
+    max_year_data = np.nan_to_num(df_time_period[time_period_col].max().year)
+    max_year = max(max_year_data, max_year)
+    full_period_range = (
+        pd.period_range(
+            f"01/01/{min_year}",
+            f"31/12/{max_year}",
+            freq=period,
+        )
+        .to_timestamp()
+        .to_frame(index=False, name=time_period_col)
+        .reset_index(drop=True)
+    )
+    return full_period_range.merge(df_time_period, "left").fillna(0)
+
+
+def minInstalls_coarse_partition(number: float):
+    if number < 100e3:
+        return "<100K"
+    if (number >= 100e3) and (number < 1e6):
+        return "100K-1M"
+    if number > 1e6:
+        return "1M+"
+
+
+# %%
+def result_dict_to_dataframe(
+    result_dict: dict, sort_by: str = "counts", category_name: str = "cluster"
+) -> pd.DataFrame:
+    """Prepares the output dataframe"""
+    return (
+        pd.DataFrame(result_dict)
+        .T.reset_index()
+        .sort_values(sort_by)
+        .rename(columns={"index": category_name})
+    )
+
+
+def get_category_time_series(
+    time_series_df: pd.DataFrame,
+    category_of_interest: str,
+    time_column: str = "releaseYear",
+    category_column: str = "cluster",
+) -> dict:
+    """Gets cluster or user-specific time series"""
+    return (
+        time_series_df.query(f"{category_column} == @category_of_interest")
+        .drop(category_column, axis=1)
+        .sort_values(time_column)
+        .rename(columns={time_column: "year"})
+        .assign(year=lambda x: pd.to_datetime(x.year.apply(lambda y: str(int(y)))))
+        .pipe(
+            impute_empty_periods,
+            time_period_col="year",
+            period="Y",
+            min_year=2010,
+            max_year=2021,
+        )
+        .assign(year=lambda x: x.year.dt.year)
+    )
+
+
+def get_estimates(
+    time_series_df: pd.DataFrame,
+    value_column: str = "counts",
+    time_column: str = "releaseYear",
+    category_column: str = "cluster",
+    estimate_function=growth,
+    year_start: int = 2019,
+    year_end: int = 2020,
+):
+    """
+    Get growth estimate for each category
+
+    growth_estimate_function - either growth, smoothed_growth, or magnitude
+    For growth, use 2019 and 2020 as year_start and year_end
+    For smoothed_growth and magnitude, use 2017 and 2021
+    """
+    time_series_df_ = time_series_df[[time_column, category_column, value_column]]
+
+    result_dict = {
+        category: estimate_function(
+            get_category_time_series(
+                time_series_df_, category, time_column, category_column
+            ),
+            year_start=year_start,
+            year_end=year_end,
+        )
+        for category in time_series_df[category_column].unique()
+    }
+    return result_dict_to_dataframe(result_dict, value_column, category_column)
+
+
+def get_magnitude_vs_growth(
+    time_series_df: pd.DataFrame,
+    value_column: str = "counts",
+    time_column: str = "releaseYear",
+    category_column: str = "cluster",
+):
+    """Get magnitude vs growth esitmates"""
+    df_growth = get_estimates(
+        time_series_df,
+        value_column=value_column,
+        time_column=time_column,
+        category_column=category_column,
+        estimate_function=smoothed_growth,
+        year_start=2017,
+        year_end=2021,
+    ).rename(columns={value_column: "Growth"})
+
+    df_magnitude = get_estimates(
+        time_series_df,
+        value_column=value_column,
+        time_column=time_column,
+        category_column=category_column,
+        estimate_function=magnitude,
+        year_start=2017,
+        year_end=2021,
+    ).rename(columns={value_column: "Magnitude"})
+
+    return df_growth.merge(df_magnitude, on="cluster")
+
+
+def get_smoothed_timeseries(
+    time_series_df: pd.DataFrame,
+    value_column: str = "counts",
+    time_column: str = "releaseYear",
+    category_column: str = "cluster",
+):
+    """TODO: Finish this one!"""
+    time_series_df_ = time_series_df[[time_column, category_column, value_column]]
+
+    return pd.concat(
+        [
+            moving_average(
+                get_category_time_series(
+                    time_series_df_, category, time_column, category_column
+                ),
+                replace_columns=True,
+            )
+            for category in time_series_df[category_column].unique()
+        ],
+        ignore_index=True,
+    )
+
+
+# %%
+app_install_categories = ["<100K", "100K-1M", "1M+"]
 
 # %% [markdown]
 # ### Trends: App development trends
@@ -1250,9 +1526,6 @@ result_dict
 
 # %% [markdown]
 # #### App development trends: Big picture
-
-# %%
-app_details
 
 # %%
 new_apps_per_year_all = (

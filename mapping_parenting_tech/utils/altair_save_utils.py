@@ -1,37 +1,36 @@
-""" Scripts to save altair charts """
+"""
+innovation_sweet_spots.utils.altair_save_utils
 
+Functions to save altair charts
+"""
 from altair_saver import save
 from selenium import webdriver
 from webdriver_manager.chrome import ChromeDriverManager
 import os
-
-import mapping_parenting_tech
+from typing import Iterator
 from mapping_parenting_tech import PROJECT_DIR
+import logging
 
-
-FIG_PATH = f"{PROJECT_DIR}/outputs/figures"
-
-# Checks if the right paths exist and if not creates them when imported
-os.makedirs(f"{FIG_PATH}/png", exist_ok=True)
-os.makedirs(f"{FIG_PATH}/html", exist_ok=True)
-os.makedirs(f"{FIG_PATH}/svg", exist_ok=True)
+FIGURE_PATH = f"{PROJECT_DIR}/outputs/figures"
+DEFAULT_FILETYPES = ["png", "svg", "html"]
 
 
 def google_chrome_driver_setup():
-    # Set up the driver to save figures as png
+    """Set up the driver to save figures"""
     driver = webdriver.Chrome(ChromeDriverManager().install())
     return driver
 
 
-def save_altair(fig, name, driver, path=FIG_PATH):
-    """Saves an altair figure as png and html
-    Args:
-        fig: altair chart
-        name: name to save the figure
-        driver: webdriver
-        path: path to save the figure
-    """
-    # Save png
+def create_paths(
+    path: os.PathLike = FIGURE_PATH, filetypes: Iterator[list] = DEFAULT_FILETYPES
+):
+    """Checks if the paths exist and if not creates them"""
+    for filetype in filetypes:
+        os.makedirs(f"{path}/{filetype}", exist_ok=True)
+
+
+def save_png(fig, path: os.PathLike, name: str, driver):
+    """Save altair chart as a  raster png file"""
     save(
         fig,
         f"{path}/png/{name}.png",
@@ -39,11 +38,53 @@ def save_altair(fig, name, driver, path=FIG_PATH):
         webdriver=driver,
         scale_factor=5,
     )
-    # Save html
+
+
+def save_html(fig, path: os.PathLike, name: str):
+    """Save altair chart as an html file"""
     fig.save(f"{path}/html/{name}.html")
-    # Save svg
+
+
+def save_svg(fig, path: os.PathLike, name: str, driver):
+    """Save altair chart as a vector svg file"""
     save(fig, f"{path}/svg/{name}.svg", method="selenium", webdriver=driver)
 
 
-if __name__ == "__main__":
-    google_chrome_driver_setup()
+class AltairSaver:
+    """
+    Class helping to easily save altair charts
+    """
+
+    def __init__(
+        self,
+        path: os.PathLike = FIGURE_PATH,
+        filetypes: Iterator[list] = DEFAULT_FILETYPES,
+    ):
+        self.driver = google_chrome_driver_setup()
+        self.path = path
+        self.filetypes = filetypes
+
+    def save(
+        self, fig, name: str, path: os.PathLike = None, filetypes: Iterator[list] = None
+    ):
+        """
+        Saves an altair figure in multiple formats (png, html and svg files)
+
+        Args:
+            fig: altair chart
+            name: name to save the figure
+            driver: webdriver
+            path: path where to save the figure
+            filetype: list of filetypes, eg: ['png', 'svg', 'html']
+        """
+        # Default values
+        path = self.path if path is None else path
+        filetypes = self.filetypes if filetypes is None else filetypes
+        # Check paths
+        create_paths(path, filetypes)
+        if "png" in filetypes:
+            save_png(fig, path, name, self.driver)
+        if "html" in filetypes:
+            save_html(fig, path, name)
+        if "svg" in filetypes:
+            save_svg(fig, path, name, self.driver)

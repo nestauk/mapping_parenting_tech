@@ -12,6 +12,7 @@ ChartType = alt.vegalite.v4.api.Chart
 FONT = "Averta"
 TITLE_FONT = "Zosia"
 NESTA_COLOURS = [
+    # Nesta brand colors:
     "#0000FF",
     "#FDB633",
     "#18A48C",
@@ -25,6 +26,8 @@ NESTA_COLOURS = [
     "#F6A4B7",
     "#D2C9C0",
     "#000000",
+    # Extra non-Nesta colors:
+    "#4d16c4",
 ]
 
 
@@ -107,15 +110,15 @@ def bar_chart(
     return (
         alt.Chart(
             data,
-            width=400,
-            height=300,
+            width=width,
+            height=height,
         )
         .mark_bar(color=color_)
         .encode(
-            alt.Y(f"{labels_column}:O", title=values_title),
-            alt.X(f"{values_column}:Q", title=labels_title),
+            x=alt.X(f"{values_column}:Q", title=labels_title),
+            y=alt.Y(f"{labels_column}:N", title=values_title, sort="-x"),
             tooltip=tooltip,
-            color=color,
+            # color=color,
         )
         .properties(
             title={
