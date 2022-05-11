@@ -5,6 +5,7 @@ import pandas as pd
 from mapping_parenting_tech import PROJECT_DIR, logging
 from mapping_parenting_tech.utils import play_store_utils as psu
 import numpy as np
+import re
 
 DATA_DIR = PROJECT_DIR / "outputs/data"
 REVIEWS_DIR = DATA_DIR / "app_reviews"
@@ -127,6 +128,21 @@ def get_app_reviews(test: bool = False) -> pd.DataFrame:
         .merge(focus_apps, on="appId")
         .merge(get_app_details()[["appId", "minInstalls"]], on="appId")
     )
+
+
+def get_review_dates(app_reviews) -> pd.DataFrame:
+    """Create a new dataframe, `reviewDates`, with the number of reviews for each app per year"""
+
+    review_dates = (
+        app_reviews.groupby(["appId", "reviewYear"])["appId"]
+        .count()
+        .unstack()
+        .reset_index()
+    )
+    app_total_reviews = app_reviews.groupby(["appId"])["appId"].count()
+    review_dates["total_reviews"] = review_dates["appId"].map(app_total_reviews)
+    review_dates = review_dates.merge(get_relevant_apps(), on=["appId"])
+    return review_dates
 
 
 def save_data_table(table: pd.DataFrame, filename: str, folder=TABLES_DIR):
@@ -443,3 +459,19 @@ def get_smoothed_timeseries(
         ],
         ignore_index=True,
     )
+
+
+#### Utils for app icons
+def app_name_to_filename(name: str):
+    return re.sub("\.", "_", name)
+
+
+def filename_to_app_name(name: str):
+    return re.sub("_", "\.", name)
+
+
+def fetch_icons(df, output_dir):
+    for i, row in tqdm(df.iterrows(), total=len(df)):
+        filename = re.sub("\.", "_", row.appId)
+        urllib.request.urlretrieve(row.icon, output_dir / f"{filename}.png")
+        time.sleep(0.5)
