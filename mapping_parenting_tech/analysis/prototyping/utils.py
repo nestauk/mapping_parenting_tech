@@ -127,6 +127,8 @@ def get_app_reviews(test: bool = False) -> pd.DataFrame:
         .assign(reviewMonth=lambda x: pd.to_datetime(x["at"]).dt.month)
         .merge(focus_apps, on="appId")
         .merge(get_app_details()[["appId", "minInstalls"]], on="appId")
+        .drop_duplicates("reviewId")
+        .assign(user=lambda x: x.cluster.apply(map_cluster_to_user))
     )
 
 
@@ -183,6 +185,31 @@ def install_labels(number: float):
         return f"{number / 1e+9: .0f}B"
 
 
+def install_labels_range(number: float):
+    if number < 1000:
+        return f"0-1K"
+    if (number >= 1000) and (number < 10_000):
+        return f"1K-10K"
+    if (number >= 10_000) and (number < 100e3):
+        return f"10K-100K"
+    if (number >= 100_000) and (number < 1e6):
+        return f"100K-1M"
+    if (number >= 1e6) and (number < 10e6):
+        return f"1M-10M"
+    if number >= 10e6:
+        return f"10M+"
+
+
+def install_labels(number: float):
+    if number < 10_000:
+        return f"{number}"
+    if (number >= 10_000) and (number < 1000e3):
+        return f"{number/1e+3:.0f}K"
+    if number >= 1000_000:
+        return f"{number/1e+6:.0f}M"
+
+
+app_install_ranges = ["0-1K", "1K-10K", "10K-100K", "100K-1M", "1M-10M", "10M+"]
 app_install_categories = ["<100K", "100K-1M", "1M+"]
 
 #### Helper functions for trends
@@ -435,7 +462,7 @@ def get_magnitude_vs_growth(
         year_end=2021,
     ).rename(columns={value_column: "Magnitude"})
 
-    return df_growth.merge(df_magnitude, on="cluster")
+    return df_growth.merge(df_magnitude, on=category_column)
 
 
 def get_smoothed_timeseries(

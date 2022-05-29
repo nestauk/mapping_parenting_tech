@@ -36,6 +36,11 @@
 from mapping_parenting_tech import logging
 from mapping_parenting_tech.utils import play_store_utils as psu
 
+# %%
+import importlib
+
+importlib.reload(psu)
+
 # %% [markdown]
 # ## Putting it together
 # ### Retrieving and using app ids via a set of downloaded web pages
@@ -82,5 +87,25 @@ logging.info(f"Reviews for {len(apps_to_do)} apps' reviews to be downloaded.")
 
 # %%
 psu.save_playstore_app_list_reviews(apps_to_do)
+
+# %%
+help(psu.save_playstore_app_list_reviews)
+
+# %% [markdown]
+# ## Re-download app reviews
+
+# %%
+import importlib
+
+importlib.reload(psu)
+
+# %%
+import mapping_parenting_tech.analysis.prototyping.utils as utils
+
+# %%
+app_details = utils.get_app_details()
+
+# %%
+psu.save_playstore_app_list_reviews(app_details.appId.to_list(), force_download=False)
 
 # %%

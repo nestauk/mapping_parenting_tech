@@ -30,16 +30,65 @@ NESTA_COLOURS = [
     "#4d16c4",
 ]
 
+FONTSIZE_TITLE = 17
+FONTSIZE_SUBTITLE = 15
+FONTSIZE_NORMAL = 13
+
+
+def configure_plots(fig, chart_title: str, chart_subtitle: str):
+    return (
+        fig.properties(
+            title={
+                "anchor": "start",
+                "text": chart_title,
+                "subtitle": chart_subtitle,
+                "subtitleFont": FONT,
+                "subtitleFontSize": FONTSIZE_SUBTITLE,
+            },
+        )
+        .configure_axis(
+            gridDash=[1, 7],
+            gridColor="grey",
+            labelFontSize=FONTSIZE_NORMAL,
+            titleFontSize=FONTSIZE_NORMAL,
+        )
+        .configure_legend(
+            titleFontSize=FONTSIZE_NORMAL,
+            labelFontSize=FONTSIZE_NORMAL,
+        )
+        .configure_view(strokeWidth=0)
+    )
+
 
 def nestafont():
     """Define Nesta fonts"""
     return {
         "config": {
-            "title": {"font": TITLE_FONT, "anchor": "start"},
-            "subtitle": {"font": FONT},
-            "axis": {"labelFont": FONT, "titleFont": FONT},
-            "header": {"labelFont": FONT, "titleFont": FONT},
-            "legend": {"labelFont": FONT, "titleFont": FONT},
+            "title": {"font": FONT, "anchor": "start", "fontSize": FONTSIZE_TITLE},
+            "subtitle": {"font": FONT, "fontSize": FONTSIZE_SUBTITLE},
+            "axis": {"labelFont": FONT, "titleFont": FONT, "fontSize": FONTSIZE_NORMAL},
+            "header": {
+                "labelFont": FONT,
+                "titleFont": FONT,
+                "fontSize": FONTSIZE_NORMAL,
+            },
+            "legend": {
+                "labelFont": FONT,
+                "titleFont": FONT,
+                "fontSize": FONTSIZE_NORMAL,
+            },
+            "mark": {
+                "font": FONT,
+                "labelFont": FONT,
+                "titleFont": FONT,
+                "fontSize": FONTSIZE_NORMAL,
+            },
+            "chart": {
+                "font": FONT,
+                "labelFont": FONT,
+                "titleFont": FONT,
+                "fontSize": FONTSIZE_NORMAL,
+            },
             "range": {
                 "category": NESTA_COLOURS,
                 "ordinal": {

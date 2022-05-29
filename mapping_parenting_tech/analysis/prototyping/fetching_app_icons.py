@@ -43,14 +43,15 @@ top_apps = pd.concat(
 
 
 # %%
-def fetch_icons(df, output_dir=outputs):
+def fetch_icons(df, output_dir=outputs, restart_i=-1):
     for i, row in tqdm(df.iterrows(), total=len(df)):
-        filename = re.sub("\.", "_", row.appId)
-        urllib.request.urlretrieve(row.icon, output_dir / f"{filename}.png")
-        time.sleep(0.25)
+        if i > restart_i:
+            filename = re.sub("\.", "_", row.appId)
+            urllib.request.urlretrieve(row.icon, output_dir / f"{filename}.png")
+            time.sleep(0.25)
 
 
 # %%
-fetch_icons(top_apps)
+fetch_icons(app_details, restart_i=1064)
 
 # %%

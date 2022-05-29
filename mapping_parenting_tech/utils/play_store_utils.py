@@ -821,10 +821,10 @@ def load_some_app_reviews(app_ids: list) -> pd.DataFrame:
             )
         except FileNotFoundError:
             logging.info(f"No reviews found for {app_id}")
-            review_df = []
+            review_df = pd.DataFrame()
         except:
             logging.warning(f"Error loading {app_id}.csv")
-            review_df = []
+            review_df = pd.DataFrame()
 
         reviews_df_list.append(review_df)
 
