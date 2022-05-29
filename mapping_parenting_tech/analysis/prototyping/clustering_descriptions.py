@@ -51,6 +51,9 @@ alt.data_transformers.disable_max_rows()
 INPUT_DATA = PROJECT_DIR / "outputs/data"
 
 # %%
+from mapping_parenting_tech.utils.io import save_text_items
+
+# %%
 # Load an embedding model
 model = SentenceTransformer("all-mpnet-base-v2")
 
@@ -62,16 +65,32 @@ details.rename(columns={"index": "appId"}, inplace=True)
 
 # %%
 # Generate sentence embeddings (might take a few minutes for 1000s of sentences)
-# description_embeddings = np.array(model.encode(details.description.to_list()))
+description_embeddings = np.array(model.encode(details.description.to_list()))
 
 # %%
-filename = "description_embeddings-22-01-21.pickle"
+description_embeddings.shape
+
+# %%
+embedding_ids = details["appId"].iloc[:, 0].to_list()
+len(embedding_ids)
+
+# %%
+filename = "description_embeddings-22-04-19.pickle"
+filename_apps = "description_embeddings-22-04-19_apps.txt"
+
+# %%
+with open(INPUT_DATA / filename, "wb") as f:
+    pickle.dump(description_embeddings, f)
+save_text_items(embedding_ids, INPUT_DATA / filename_apps)
+
+# %%
+# filename = "description_embeddings-22-01-21.pickle"
 with open(INPUT_DATA / filename, "rb") as f:
     description_embeddings = pickle.load(f)
 
 # %%
-# Check the shape of the sentence embeddings array
-print(description_embeddings.shape)
+# # Check the shape of the sentence embeddings array
+# print(description_embeddings.shape)
 
 # %%
 # Create a 2D embedding

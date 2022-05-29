@@ -307,13 +307,23 @@ def get_playstore_app_details(app_id_list: list) -> dict:
         app_id_list,
         desc="Retrieving app details",
     ):
+        # First try fetching UK details (ratings slightly differ between countries)
         try:
-            app_details = app(app_id)
+            app_details = app(app_id, lang="en", country="uk")
+            app_details["country_code"] = "uk"
             all_app_details.update({app_id: app_details})
 
         except Exception as e:  # needs modifying to capture specific errors
-            logging.warning(f"Error on app id {app_id}: {e} {repr(e)}")
-            remove_apps.append(app_id)
+            # If UK details not found, try US details
+            try:
+                app_details = app(app_id, lang="en", country="us")
+                app_details["country_code"] = "us"
+                all_app_details.update({app_id: app_details})
+
+            except Exception as e:  # needs modifying to capture specific errors
+
+                logging.warning(f"Error on app id {app_id}: {e} {repr(e)}")
+                remove_apps.append(app_id)
 
     return all_app_details
 
@@ -415,6 +425,8 @@ def get_playstore_app_reviews(
                 fetch_reviews, continuation_token = reviews(
                     app_id=target_app_id,
                     lang="en",
+                    # Note: if sorted by NEWEST then country parameter does not appear to change the result
+                    # (ie, reviews from different countries are pooled together)
                     sort=Sort.NEWEST,
                     count=how_many,
                 )
@@ -809,10 +821,10 @@ def load_some_app_reviews(app_ids: list) -> pd.DataFrame:
             )
         except FileNotFoundError:
             logging.info(f"No reviews found for {app_id}")
-            review_df = []
+            review_df = pd.DataFrame()
         except:
             logging.warning(f"Error loading {app_id}.csv")
-            review_df = []
+            review_df = pd.DataFrame()
 
         reviews_df_list.append(review_df)
 

@@ -10,7 +10,7 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.13.8
 #   kernelspec:
-#     display_name: 'Python 3.8.12 64-bit (''mapping_parenting_tech'': conda)'
+#     display_name: Python 3 (ipykernel)
 #     language: python
 #     name: python3
 # ---

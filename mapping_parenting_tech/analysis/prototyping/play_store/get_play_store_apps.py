@@ -10,7 +10,7 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.13.8
 #   kernelspec:
-#     display_name: 'Python 3.8.12 64-bit (''mapping_parenting_tech'': conda)'
+#     display_name: Python 3 (ipykernel)
 #     language: python
 #     name: python3
 # ---
@@ -36,11 +36,17 @@
 from mapping_parenting_tech import logging
 from mapping_parenting_tech.utils import play_store_utils as psu
 
+# %%
+import importlib
+
+importlib.reload(psu)
+
 # %% [markdown]
 # ## Putting it together
 # ### Retrieving and using app ids via a set of downloaded web pages
 
 # %%
+# To do: This should iterate through all folders within "play_store" as well as any additional special or interesting apps
 app_ids = psu.get_playstore_app_ids_from_folder("play_store/kids_under_five")
 psu.update_all_app_id_list(app_ids)
 
@@ -51,6 +57,10 @@ psu.update_all_app_details()
 # %%
 # get the reviews just for the apps we've identified
 psu.save_playstore_app_list_reviews(app_ids)
+
+# %%
+# Add any custom apps
+# psu.save_playstore_app_list_reviews(["com.learnandgo.kaligo.homemena"])
 
 # %% [markdown]
 # Take a list of apps (here, `INTERESTING_APPS`), identify those that are new and then snowball from them
@@ -77,3 +87,25 @@ logging.info(f"Reviews for {len(apps_to_do)} apps' reviews to be downloaded.")
 
 # %%
 psu.save_playstore_app_list_reviews(apps_to_do)
+
+# %%
+help(psu.save_playstore_app_list_reviews)
+
+# %% [markdown]
+# ## Re-download app reviews
+
+# %%
+import importlib
+
+importlib.reload(psu)
+
+# %%
+import mapping_parenting_tech.analysis.prototyping.utils as utils
+
+# %%
+app_details = utils.get_app_details()
+
+# %%
+psu.save_playstore_app_list_reviews(app_details.appId.to_list(), force_download=False)
+
+# %%

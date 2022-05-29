@@ -10,7 +10,7 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.13.8
 #   kernelspec:
-#     display_name: Python 3.8.0 ('mapping_parenting_tech')
+#     display_name: Python 3 (ipykernel)
 #     language: python
 #     name: python3
 # ---
@@ -37,6 +37,12 @@ INPUT_DIR = PROJECT_DIR / "inputs/data/play_store"
 TPM_DIR = OUTPUT_DIR / "tpm"
 MODEL_NAME = "play_store_reviews"
 
+# %%
+# Functionality for saving charts
+import mapping_parenting_tech.utils.altair_save_utils as alt_save
+
+AltairSaver = alt_save.AltairSaver()
+
 # %% [markdown]
 # ## Load and process data
 
@@ -60,8 +66,8 @@ relevant_apps = pd.read_csv(INPUT_DIR / "relevant_app_ids.csv")
 # %%
 # Load in app details
 details = pd.read_json(OUTPUT_DIR / "all_app_details.json", orient="index")
-details.reset_index(inplace=True)
-details.rename(columns={"index": "appId"}, inplace=True)
+details.reset_index(inplace=True, drop=True)
+# details.rename(columns={"index": "appId"}, inplace=True)
 details.shape
 
 # %%
@@ -107,15 +113,57 @@ details = details.merge(
 # get the index of those apps that aren't relevant
 remove_apps = details[details["cluster"].isna()].index
 
-# %%
-# Load the existing embeddings of the app descriptions
-with open(OUTPUT_DIR / "description_embeddings-22-01-21.pickle", "rb") as f:
-    description_embeddings = pickle.load(f)
+# %% [markdown]
+# ## Plot embeddings
 
 # %%
-# remove 'irrelevant' apps from the dataframe and the embedding
-description_embeddings = np.delete(description_embeddings, remove_apps, 0)
-details.drop(remove_apps, inplace=True)
+app_details = details[-details.cluster.isnull()]
+
+# %%
+import mapping_parenting_tech.utils.embeddings_utils as eu
+from sentence_transformers import SentenceTransformer
+
+# Embedding model name
+EMBEDDING_MODEL = "all-mpnet-base-v2"
+# File names
+vector_filename = "app_description_vectors_2022_04_27"
+embedding_model = EMBEDDING_MODEL
+EMBEDINGS_DIR = PROJECT_DIR / "outputs/data"
+
+# %%
+model = SentenceTransformer(EMBEDDING_MODEL)
+
+# %%
+# # Load the existing embeddings of the app descriptions
+# filename = "description_embeddings-22-01-21.pickle"
+# filename = "description_embeddings-22-04-19.pickle"
+# with open(OUTPUT_DIR / filename, "rb") as f:
+#     description_embeddings = pickle.load(f)
+
+# %%
+# description_embeddings.shape
+
+# %%
+# Generate sentence embeddings (might take a few minutes for 1000s of sentences)
+description_embeddings = np.array(model.encode(app_details.description.to_list()))
+
+# %%
+v = eu.Vectors(
+    vector_ids=app_details["appId"].to_list(),
+    vectors=description_embeddings,
+    filename=vector_filename,
+    model_name=EMBEDDING_MODEL,
+    folder=EMBEDINGS_DIR,
+)
+v.vectors.shape
+
+# %%
+# v.save_vectors(vector_filename, EMBEDINGS_DIR)
+
+# %%
+# # remove 'irrelevant' apps from the dataframe and the embedding
+# description_embeddings = np.delete(description_embeddings, remove_apps, 0)
+# details.drop(remove_apps, inplace=True)
 
 # %%
 # Reduce the embedding to 2 dimensions
@@ -133,19 +181,56 @@ embedding.shape
 
 # %%
 # Prepare dataframe for visualisation
-df = details.copy()
+df = app_details.copy()
 df["x"] = embedding[:, 0]
 df["y"] = embedding[:, 1]
+
+# %%
+from mapping_parenting_tech.utils import plotting_utils as pu
+
+# %%
+app_details.info()
 
 # %%
 # Visualise using altair
 fig = (
     alt.Chart(df.reset_index(), width=700, height=700)
     .mark_circle(size=60)
-    .encode(x="x", y="y", tooltip=["cluster", "appId", "summary"], color="cluster:N")
-).interactive()
+    .encode(
+        x=alt.X("x", axis=None),
+        y=alt.Y("y", axis=None),
+        tooltip=["cluster", "title", "description", "score", "url"],
+        color="cluster:N",
+        href="url:N",
+        # size='minInstalls',
+    )
+    .configure_axis(
+        # gridDash=[1, 7],
+        gridColor="white",
+    )
+    .configure_view(strokeWidth=0, strokeOpacity=0)
+    .properties(
+        title={
+            "anchor": "start",
+            "text": ["Apps for parents and children"],
+            "subtitle": ["Landscape of Play Store apps "],
+            "subtitleFont": pu.FONT,
+        },
+    )
+    .interactive()
+)
 
 fig
+
+# %%
+filename = "app_landscape_v2022_04_27"
+AltairSaver.save(fig, filename, filetypes=["html"])
+
+# %%
+df.to_csv(AltairSaver.path + f"/{filename}.csv", index=False)
+
+# %% [markdown]
+# ## Visualising topics
 
 # %%
 # merge the topic probabilities with the app details; fill apps that have no reviews with 0 to avoid 'NaN'

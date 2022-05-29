@@ -1,6 +1,5 @@
 """
-mapping_parenting_tech.analysis.cluster_analysis_utils.py
-
+innovation_sweet_spots.utils.cluster_analysis_utils
 Module for various cluster analysis (eg extracting cluster-specific keywords)
 """
 import numpy as np
@@ -14,19 +13,22 @@ def cluster_texts(documents: Iterator[str], cluster_labels: Iterator) -> Dict:
     """
     Creates a large text string for each cluster, by joining up the
     text strings (documents) belonging to the same cluster
-
     Args:
         documents: A list of text strings
         cluster_labels: A list of cluster labels, indicating the membership of the text strings
-
     Returns:
         A dictionary where keys are cluster labels, and values are cluster text documents
     """
 
     assert len(documents) == len(cluster_labels)
-    cluster_text_dict = defaultdict(str)
+    doc_type = type(documents[0])
+
+    cluster_text_dict = defaultdict(doc_type)
     for i, doc in enumerate(documents):
-        cluster_text_dict[cluster_labels[i]] += doc + " "
+        if doc_type is str:
+            cluster_text_dict[cluster_labels[i]] += doc + " "
+        elif doc_type is list:
+            cluster_text_dict[cluster_labels[i]] += doc
     return cluster_text_dict
 
 
@@ -34,29 +36,31 @@ def cluster_keywords(
     documents: Iterator[str],
     cluster_labels: Iterator[int],
     n: int = 10,
+    tokenizer=simple_tokenizer,
+    max_df: float = 0.90,
+    min_df: float = 0.01,
+    Vectorizer=TfidfVectorizer,
 ) -> Dict:
     """
     Generates keywords that characterise the cluster, using the specified Vectorizer
-
     Args:
         documents: List of (preprocessed) text documents
         cluster_labels: List of integer cluster labels
         n: Number of top keywords to return
         Vectorizer: Vectorizer object to use (eg, TfidfVectorizer, CountVectorizer)
         tokenizer: Function to use to tokenise the input documents; by default splits the document into words
-
     Returns:
         Dictionary that maps cluster integer labels to a list of keywords
     """
 
     # Define vectorizer
-    vectorizer = TfidfVectorizer(
+    vectorizer = Vectorizer(
         analyzer="word",
-        tokenizer=simple_tokenizer,
+        tokenizer=tokenizer,
         preprocessor=lambda x: x,
         token_pattern=None,
-        max_df=0.90,
-        min_df=0.01,
+        max_df=max_df,
+        min_df=min_df,
         max_features=10000,
     )
 
