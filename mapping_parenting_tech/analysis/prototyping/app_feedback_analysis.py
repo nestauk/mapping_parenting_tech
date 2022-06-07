@@ -232,6 +232,98 @@ table_name = "no_of_parent_apps"
 utils.save_data_table(app_counts_parents, table_name)
 AltairSaver.save(fig, table_name, filetypes=["html", "svg", "png"])
 
+# %%
+users_to_plot = ["Children", "Parents"]
+labels_title = "Category"
+values_title = "Number of apps"
+colour_title = "App user"
+
+app_counts_all = (
+    app_details.query(f"user in @users_to_plot")
+    .groupby(["user", "cluster"], as_index=False)
+    .agg(app_count=("appId", np.count_nonzero))
+    .sort_values(["app_count"], ascending=False)
+    .sort_values("user")
+    .rename(
+        columns={
+            "cluster": labels_title,
+            "app_count": values_title,
+            "user": colour_title,
+        }
+    )
+)
+
+# %%
+app_counts_all
+
+# %%
+app_counts_all["Number of apps"].sum()
+
+# %%
+tooltip = [labels_title, values_title, colour_title]
+color = pu.NESTA_COLOURS[0]
+
+chart_title = "Apps for toddlers and parents"
+chart_subtitle = "Number of different types of apps in the UK Google Play Store"
+
+fig = (
+    alt.Chart(
+        app_counts_all,
+        width=300,
+        height=400,
+    )
+    .mark_bar(color=color)
+    .encode(
+        x=alt.X(
+            f"{values_title}:Q", title=values_title, scale=alt.Scale(domain=(0, 260))
+        ),
+        y=alt.Y(
+            f"{labels_title}:N",
+            title="",
+            # sort="-x",
+            sort=app_counts_all[labels_title].to_list(),
+            axis=alt.Axis(labelLimit=250),
+        ),
+        color=colour_title,
+        tooltip=tooltip,
+    )
+)
+
+fig = pu.configure_plots(fig, chart_title, chart_subtitle)
+fig
+
+# %%
+alt_text = " ".join(
+    [
+        "This graph shows a bar chart with the number of different types of apps for toddlers and parents in the UK Google Play Store.",
+        "The categories of apps aimed at children and the number of apps in each category are the following:",
+        "; ".join(
+            [
+                f"{row['Category']}: {row['Number of apps']}"
+                for i, row in app_counts_all.query(
+                    "`App user` == 'Children'"
+                ).iterrows()
+            ]
+        )
+        + ".",
+        "The categories of apps aimed at parents and the number of apps in each category are the following:",
+        "; ".join(
+            [
+                f"{row['Category']}: {row['Number of apps']}"
+                for i, row in app_counts_all.query("`App user` == 'Parents'").iterrows()
+            ]
+        )
+        + ".",
+    ]
+)
+alt_text
+
+# %%
+importlib.reload(utils)
+table_name = "no_of_all_apps"
+utils.save_data_table(app_counts_all, table_name)
+AltairSaver.save(fig, table_name, filetypes=["html", "svg", "png"])
+
 # %% [markdown]
 # #### Number of apps per release year
 
