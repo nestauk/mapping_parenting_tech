@@ -677,6 +677,21 @@ table_name = "top_apps_per_category_children"
 AltairSaver.save(fig, table_name, filetypes=["html", "svg", "png"])
 
 # %%
+df = t_dfs_[
+    [
+        "ordering",
+        labels_title,
+        "icon",
+        "url",
+        "title",
+        "Description",
+        "Installations",
+        "Score",
+    ]
+]
+utils.save_data_table(df, table_name)
+
+# %%
 n_top = 5
 top_apps = pd.concat(
     [
@@ -1040,28 +1055,37 @@ apps_access_plot = (
 )
 
 # %%
-apps_access_plot
+sort_order = (
+    apps_access_plot.query("`Free, ads or purchases`=='Free'")
+    .sort_values("Percentage")
+    .Category.to_list()
+)
 
 # %%
-chart_title = "Percentage of apps that are free, feature ads or have in-app purchases"
-chart_subtitle = "While most apps are free, the majority of apps have in-app purchases"
+# chart_title = "Percentage of apps that are free, feature ads or have in-app purchases"
+# chart_subtitle = "While most apps are free, the majority of apps have in-app purchases"
+chart_title = ""
+chart_subtitle = ""
 
 fig = (
     alt.Chart(
         apps_access_plot.sort_values("Percentage", ascending=False),
         width=250,
     )
-    .transform_calculate(key="datum.variable == 'Free'")
-    .transform_joinaggregate(sort_key="argmax(key)", groupby=["Category"])
-    .transform_calculate(sort_val="datum.sort_key.value")
-    .mark_bar()
-    .encode(
+    # .transform_calculate(key="datum.variable == 'Free'")
+    # .transform_joinaggregate(sort_key="argmax(key)", groupby=["Category"])
+    # .transform_calculate(sort_val="datum.sort_key.value")
+    .mark_bar().encode(
         row=alt.Row(
             "Category",
             header=alt.Header(
-                labelAngle=0, labelAlign="left", labelFontSize=pu.FONTSIZE_NORMAL
+                labelAngle=0,
+                labelAlign="left",
+                labelFontSize=pu.FONTSIZE_NORMAL,
+                labelLimit=163,
             ),
-            sort=alt.SortField("sort_val", order="ascending"),
+            sort=sort_order
+            # sort=alt.SortField("sort_val", order="ascending"),
         ),
         y=alt.Y(
             "Free, ads or purchases",
@@ -1073,7 +1097,11 @@ fig = (
             axis=alt.Axis(grid=True, format="%", labelAlign="center"),
             title="",
         ),
-        color=alt.Color("Free, ads or purchases", sort=["Free", "In-app purchases"]),
+        color=alt.Color(
+            "Free, ads or purchases",
+            sort=["Free", "In-app purchases"],
+            legend=alt.Legend(orient="top"),
+        ),
         tooltip=[
             "Category",
             "Free, ads or purchases",
@@ -1575,7 +1603,8 @@ review_growth_yoy
 
 # %%
 tooltip = [labels_title, colour_title, values_title]
-chart_title = "Number of reviews on Play Store in 2019 and 2020"
+# chart_title = "Number of reviews on Play Store in 2019 and 2020"
+chart_title = ""
 chart_subtitle = ""
 
 fig = (
@@ -1589,7 +1618,7 @@ fig = (
         alt.X(
             f"{values_title}:Q",
             title=values_title,
-            scale=alt.Scale(zero=False, domain=(0, 140)),
+            # scale=alt.Scale(zero=False, domain=(0, 140)),
             axis=alt.Axis(grid=False, labelAlign="center", tickCount=5),
         ),
         alt.Y(
@@ -1603,7 +1632,7 @@ fig = (
             scale=alt.Scale(
                 domain=[2019, 2020], range=[pu.NESTA_COLOURS[2], pu.NESTA_COLOURS[3]]
             ),
-            legend=alt.Legend(title=colour_title, titleAnchor="middle", orient="right"),
+            legend=alt.Legend(title=colour_title, titleAnchor="middle", orient="top"),
         ),
         tooltip=tooltip,
     )
@@ -1625,6 +1654,12 @@ fig = (
 )
 
 fig
+
+# %%
+importlib.reload(utils)
+table_name = "children_app_reviews_2019_2020"
+utils.save_data_table(reviews_per_year_by_cluster, f"{table_name}")
+AltairSaver.save(fig, table_name, filetypes=["html", "svg", "png"])
 
 # %%
 tooltip = [labels_title, growth_title]
@@ -1649,9 +1684,9 @@ fig_growth = (
         ),
         y=alt.Y(
             f"{labels_title}:N",
-            title="",
+            title="Category",
             sort=sort_order,
-            axis=alt.Axis(labelLimit=300, labels=False),
+            # axis=alt.Axis(labelLimit=300, labels=False),
         ),
         tooltip=[
             labels_title,
@@ -1675,6 +1710,14 @@ fig_growth = (
     # .configure_view(strokeWidth=0)
     # .interactive()
 )
+
+fig_growth
+
+# %%
+importlib.reload(utils)
+table_name = "children_app_growth_2019_2020"
+utils.save_data_table(review_growth_yoy, f"{table_name}")
+AltairSaver.save(fig_growth, table_name, filetypes=["html", "svg", "png"])
 
 # %%
 fig_final = (
