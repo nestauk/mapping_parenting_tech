@@ -149,7 +149,22 @@ df = (
 # ## Prepare
 
 # %%
-importlib.reload(utils)
+from bs4 import BeautifulSoup
+
+
+def clean_html(html):
+    soup = BeautifulSoup(html)
+    text = soup.get_text()
+    return text
+
+
+def shorten_text(text, l=250):
+    return text[0:l] + "..."
+
+
+def shorten_and_clean(html):
+    return shorten_text(clean_html(html))
+
 
 # %%
 filename = "app_landscape_v2022_05_04"
@@ -176,24 +191,6 @@ df_viz = (
 )
 df_viz.loc[df_viz["Score"] == 0, "Score"] = "n/a"
 df_viz["Score"] = df_viz["Score"].astype(str)
-
-# %%
-from bs4 import BeautifulSoup
-
-
-def clean_html(html):
-    soup = BeautifulSoup(html)
-    text = soup.get_text()
-    return text
-
-
-def shorten_text(text, l=250):
-    return text[0:l] + "..."
-
-
-def shorten_and_clean(html):
-    return shorten_text(clean_html(html))
-
 
 # %%
 from sklearn.cluster import KMeans
@@ -238,7 +235,6 @@ soft_clusters = list(clusterer.labels_)
 soft_cluster = [np.argmax(x) for x in soft_clusters]
 
 # %%
-# %%
 title_texts = df_viz["title"].apply(preproc)
 
 # %%
@@ -271,8 +267,6 @@ centroids = (
         )
     )
 )
-
-# %%
 
 # %%
 import importlib
@@ -311,6 +305,9 @@ SPEC_COLOURS = [
     # Extra non-Nesta colors:
     "#4d16c4",
 ]
+
+# %% [markdown]
+# ### Plot
 
 # %%
 # Visualise using altair
@@ -383,23 +380,23 @@ annotation_text = (
     )
 )
 
-line_1 = (
-    alt.Chart(df_line_1)
-    .mark_line(color="#333333", strokeDash=[1.5, 4])
-    .encode(
-        x=alt.X("x:Q"),
-        y=alt.Y("y:Q"),
-    )
-)
+# line_1 = (
+#     alt.Chart(df_line_1)
+#     .mark_line(color="#333333", strokeDash=[1.5, 4])
+#     .encode(
+#         x=alt.X("x:Q"),
+#         y=alt.Y("y:Q"),
+#     )
+# )
 
-line_2 = (
-    alt.Chart(df_line_1)
-    .mark_line(color="#333333", strokeDash=[1.5, 4])
-    .encode(
-        x=alt.X("x:Q"),
-        y=alt.Y("y:Q"),
-    )
-)
+# line_2 = (
+#     alt.Chart(df_line_1)
+#     .mark_line(color="#333333", strokeDash=[1.5, 4])
+#     .encode(
+#         x=alt.X("x:Q"),
+#         y=alt.Y("y:Q"),
+#     )
+# )
 
 
 fig_final = (
@@ -426,11 +423,195 @@ fig_final = (
 fig_final
 
 # %%
-filename = "app_landscape_v2022_05_28"
-AltairSaver.save(fig_final, filename, filetypes=["html", "svg", "png"])
+# filename = "app_landscape_v2022_05_28"
+# AltairSaver.save(fig_final, filename, filetypes=["html", "svg", "png"])
 
 # %%
 df_viz.to_csv(AltairSaver.path + f"/tables/{filename}.csv", index=False)
+
+# %%
+import mapping_parenting_tech.utils.io
+
+importlib.reload(mapping_parenting_tech.utils.io)
+mapping_parenting_tech.utils.io.save_json(
+    (
+        df_viz.drop(
+            ["comments", "descriptionHTML", "screenshots", "recentChanges"], axis=1
+        )
+    ).to_dict(orient="records"),
+    AltairSaver.path + f"/{filename}.json",
+)
+
+# %%
+AltairSaver.path + f"/{filename}.json"
+
+# %%
+
+# %% [markdown]
+# ## Figure using URLs
+
+# %%
+importlib.reload(mapping_parenting_tech.utils.io)
+
+# %%
+mapping_parenting_tech.utils.io.save_json(
+    df_viz[
+        ["x", "y", "title", "User", "Category", "Description", "Installations", "Score"]
+    ].to_dict(orient="records"),
+    # df_viz[['x','y']].to_dict(orient='records'),
+    AltairSaver.path + f"/test.json",
+)
+
+# %%
+xx = df_viz[
+    [
+        "x",
+        "y",
+        "title",
+        "User",
+        "Category",
+        "Description",
+        "Installations",
+        "Score",
+        "image",
+    ]
+]
+xx.to_csv(AltairSaver.path + f"/test.csv", index=False)
+
+# %%
+alt.data_transformers.enable("json")
+
+# %%
+import mapping_parenting_tech.utils.io
+
+x = mapping_parenting_tech.utils.io.load_json(AltairSaver.path + f"/test.json")
+
+# %%
+pd.DataFrame(x).astype("float32").info()
+
+# %%
+# url = "https://discovery-hub-open-data.s3.eu-west-2.amazonaws.com/mapping_parenting_tech/data_viz/tables/app_landscape_v2022_05_28.csv"
+# url = "https://www.dropbox.com/s/d7n4z5bw2wn7wz7/app_landscape_v2022_05_28.csv?dl=1"
+# url = "https://discovery-hub-open-data.s3.eu-west-2.amazonaws.com/mapping_parenting_tech/data_viz/app_landscape_v2022_05_04.json"
+# url = AltairSaver.path + f"/test.json"
+# url = 'https://discovery-hub-open-data.s3.eu-west-2.amazonaws.com/mapping_parenting_tech/data_viz/test.json'
+url = "https://discovery-hub-open-data.s3.eu-west-2.amazonaws.com/mapping_parenting_tech/data_viz/test.json"
+url = "https://discovery-hub-open-data.s3.eu-west-2.amazonaws.com/mapping_parenting_tech/data_viz/test.csv"
+url = "https://raw.githubusercontent.com/beingkk/test/main/app_landscape_v2.csv"
+# Visualise using altair
+fig = (
+    alt.Chart(
+        url,
+        # df_viz[['x','y']],
+        width=700,
+        height=500,
+    )
+    .mark_circle(size=60, opacity=0.60)
+    .encode(
+        x=alt.X("x:Q", axis=None),
+        y=alt.Y("y:Q", axis=None),
+        tooltip=[
+            # "image",
+            "title:N",
+            "User:N",
+            "Category:N",
+            "Description:N",
+            "Installations:N",
+            "Score:N",
+            # "x", "y",
+        ],
+        color=alt.Color(
+            "Category:N",
+            legend=alt.Legend(
+                # titleAnchor='left',
+                orient="bottom",
+                columns=2,
+                # labelLimit=200,
+            ),
+            sort=sorted(utils.clusters_children) + sorted(utils.clusters_parents),
+            scale=alt.Scale(range=SPEC_COLOURS),
+        ),
+        # href="url:N",
+        # size="circle_size",
+    )
+)
+
+text = (
+    alt.Chart(centroids)
+    .mark_text(
+        font=pu.FONT,
+        fontSize=13.5,
+        fontStyle="bold",
+        opacity=0.8,
+        stroke="white",
+        strokeWidth=1,
+        strokeOffset=0,
+        strokeOpacity=0.4,
+    )
+    .encode(x=alt.X("x_c:Q"), y=alt.Y("y_c:Q"), text=alt.Text("keywords"))
+)
+
+df_txt = pd.DataFrame(
+    data={
+        "x": [2.4, -1.5],
+        "y": [6.5, 13],
+        "text": ["Parenting apps", "Children apps"],
+    }
+)
+
+annotation_text = (
+    alt.Chart(df_txt)
+    .mark_text(font=pu.FONT, fontSize=15, align="left", fontStyle="bold")
+    .encode(
+        x=alt.X("x:Q"),
+        y=alt.Y("y:Q"),
+        text=alt.Text("text"),
+    )
+)
+
+
+fig_final = (
+    # (fig + text + annotation_text)
+    (fig + text)
+    .configure_axis(
+        # gridDash=[1, 7],
+        gridColor="white",
+    )
+    .configure_view(strokeWidth=0, strokeOpacity=0)
+    # .properties(
+    # title={
+    # "anchor": "start",
+    # "text": ["Children and parenting app landscape"],
+    # "subtitle": [
+    # "Each app is visualised as a circle, with similar apps located closer together",
+    # ],
+    # "subtitleFont": pu.FONT,
+    # "subtitleFontSize": 14,
+    # },
+    # )
+    .interactive()
+)
+
+fig_final
+
+# %%
+filename = "app_landscape_test"
+AltairSaver.save(fig_final, filename, filetypes=["html", "svg", "png"])
+
+# %%
+data.airports.url
+
+# %%
+data.cars.url
+
+# %%
+import altair as alt
+from vega_datasets import data
+
+url = data.cars.url
+# url = data.airports.url
+
+alt.Chart(url).mark_point().encode(x="latitude:Q", y="longitude:Q")
 
 # %% [markdown]
 # ## Only parenting apps
