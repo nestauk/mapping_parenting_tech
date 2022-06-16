@@ -757,7 +757,7 @@ fig = (
             axis=alt.Axis(labelLimit=200),
         ),
         url="icon:N",
-        href="url:N",
+        # href="url:N",
         tooltip=["title:N", "Description:N", "Installations:Q", "Score:N"],
     )
 )
@@ -854,7 +854,56 @@ fig
 
 # %%
 table_name = "top_apps_per_category_parents"
-AltairSaver.save(fig, table_name, filetypes=["png", "svg", "html"])
+# AltairSaver.save(fig, table_name, filetypes=["png", "svg", "html"])
+
+# %%
+df = t_dfs_[
+    [
+        "ordering",
+        labels_title,
+        "icon",
+        "url",
+        "title",
+        "Description",
+        "Installations",
+        "Score",
+    ]
+]
+utils.save_data_table(df, table_name)
+
+# %%
+chart_title = "Five most popular parenting apps in each category"
+chart_subtitle = "Apps with the largest number of installations"
+url = "https://raw.githubusercontent.com/beingkk/test/main/top_apps_per_category_children.csv"
+fig = (
+    alt.Chart(
+        url,
+        width=450,
+        height=500,
+    )
+    .mark_image(
+        width=40,
+        height=40,
+    )
+    .encode(
+        x=alt.X(
+            "ordering:Q",
+            scale=alt.Scale(domain=(-1, 9)),
+            axis=None,
+        ),
+        y=alt.Y(
+            f"{labels_title}:N",
+            sort=app_counts.Category.to_list(),
+            axis=alt.Axis(labelLimit=200),
+        ),
+        url="icon:N",
+        # href="url:N",
+        tooltip=["title:N", "Description:N", "Installations:Q", "Score:N"],
+    )
+)
+
+fig = pu.configure_plots(fig, chart_title, chart_subtitle)
+fig
 
 # %% [markdown]
 # #### DfE apps (reference)
@@ -2379,9 +2428,6 @@ score_by_cluster = (
 )
 
 # %%
-score_by_cluster.head(3)
-
-# %%
 chart_title = "Parenting app scores"
 chart_subtitle = "Average scores on Play Store by app category"
 tooltip = [labels_title, values_title]
@@ -2423,6 +2469,7 @@ fig = (
     )
     .configure_view(strokeWidth=0)
 )
+
 fig = pu.configure_plots(fig, chart_title, chart_subtitle)
 fig
 
@@ -2431,6 +2478,84 @@ importlib.reload(utils)
 table_name = "app_scores_parent_apps"
 utils.save_data_table(score_by_cluster, table_name)
 AltairSaver.save(fig, table_name, filetypes=["html", "svg", "png"])
+
+# %%
+values_title = "Score"
+labels_title = "Category"
+
+score_by_cluster_full = (
+    app_details.query("user == 'Parents'")
+    .query("score != 0")
+    # .assign(score=lambda df: df.score.astype(float).round(2))
+    .reset_index()
+    .rename(
+        columns={
+            "cluster": labels_title,
+            "score": values_title,
+        }
+    )
+)
+
+# %%
+sort_order = [
+    "Baby photos",
+    "Pregnancy tracking",
+    "Fertility tracking",
+    "Helping babies to sleep",
+    "Tracking babies' rhythms",
+    "Parental support",
+]
+
+# %%
+chart_title = "Parenting app scores"
+chart_subtitle = "Average scores on Play Store by app category"
+tooltip = [labels_title, values_title]
+
+importlib.reload(pu)
+
+bars = (
+    alt.Chart(score_by_cluster_full, width=300, height=300)
+    .mark_bar(color=pu.NESTA_COLOURS[0])
+    .encode(
+        x=alt.X(f"{values_title}:Q", aggregate="mean", title="Score"),
+        y=alt.Y(
+            f"{labels_title}:N",
+            sort=sort_order,
+        ),
+        tooltip=["Category", alt.Tooltip("mean(Score):Q", format=",.2f")],
+    )
+)
+
+error_bars = (
+    alt.Chart(score_by_cluster_full)
+    .mark_errorbar(extent="stdev")
+    .encode(
+        x=alt.X(f"{values_title}:Q"),
+        y=alt.Y(labels_title, sort=sort_order),
+        strokeWidth=alt.value(2.5),
+    )
+)
+
+fig = (
+    (bars + error_bars)
+    .configure_axis(
+        gridDash=[1, 7],
+        gridColor="grey",
+        labelFontSize=pu.FONTSIZE_NORMAL,
+        titleFontSize=pu.FONTSIZE_NORMAL,
+    )
+    .configure_view(strokeWidth=0)
+)
+fig
+
+# %%
+importlib.reload(utils)
+table_name = "app_scores_parent_apps"
+utils.save_data_table(score_by_cluster, table_name)
+AltairSaver.save(fig, table_name, filetypes=["html", "svg", "png"])
+
+# %%
+app_details[(app_details.user == "Parents") & (app_details.score > 0)].score.mean()
 
 # %%
 # fig =  (
@@ -2523,7 +2648,7 @@ fig_ts = (
     .encode(
         x=alt.X(f"{horizontal_title}:O", title=horizontal_title),
         y=alt.Y(f"sum({values_title}):Q", title=values_title),
-        color=f"{color_title}:N",
+        color=alt.Color(f"{color_title}:N", legend=alt.Legend(orient="top", columns=2)),
         tooltip=tooltip,
     )
     .properties(
@@ -2576,7 +2701,7 @@ df_long = (
 df_long
 
 # %%
-chart_title = " "
+chart_title = "Parenting app development trends"
 chart_subtitle = "Smoothed growth estimate between 2017 and 2021"
 tooltip = [labels_title, values_title]
 
@@ -2601,7 +2726,7 @@ fig = (
             sort="-x",
             axis=alt.Axis(labelLimit=200),
         ),
-        color=labels_title,
+        color=alt.Color(labels_title, legend=None),
         tooltip=[
             labels_title,
             alt.Tooltip(f"{values_title}:Q", title=values_title, format=".0%"),

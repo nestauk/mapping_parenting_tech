@@ -111,6 +111,8 @@ target/
 !/outputs/models/*.md
 /outputs/figures/*
 !/outputs/dataset/*
+!/outputs/figures/tables/top_apps_per_category_parents.csv
+!/outputs/figures/tables/top_apps_per_category_children.csv
 
 # Mac OS-specific storage files
 .DS_Store
