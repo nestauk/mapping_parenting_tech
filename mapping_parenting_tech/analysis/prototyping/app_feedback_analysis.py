@@ -874,7 +874,7 @@ utils.save_data_table(df, table_name)
 # %%
 chart_title = "Five most popular parenting apps in each category"
 chart_subtitle = "Apps with the largest number of installations"
-url = "https://raw.githubusercontent.com/beingkk/test/main/top_apps_per_category_children.csv"
+url = "https://raw.githubusercontent.com/beingkk/test/main/top_apps_per_category_parents.csv"
 fig = (
     alt.Chart(
         url,
@@ -893,7 +893,7 @@ fig = (
         ),
         y=alt.Y(
             f"{labels_title}:N",
-            sort=app_counts.Category.to_list(),
+            sort=app_counts_parents.Category.to_list(),
             axis=alt.Axis(labelLimit=200),
         ),
         url="icon:N",
@@ -904,6 +904,22 @@ fig = (
 
 fig = pu.configure_plots(fig, chart_title, chart_subtitle)
 fig
+
+# %%
+table_name = "top_apps_per_category_parents_url"
+AltairSaver.save(fig, table_name, filetypes=["html"])
+
+# %%
+top_app_dict = {}
+for cat in t_dfs_.Category.unique():
+    top_app_dict[cat] = (
+        t_dfs_.query("Category == @cat")
+        .sort_values("Installations", ascending=False)
+        .iloc[0]
+        .title
+    )
+alt_text = "; ".join([f"{cat}: {top_app_dict[cat]}" for cat in top_app_dict])
+alt_text
 
 # %% [markdown]
 # #### DfE apps (reference)
@@ -2140,6 +2156,14 @@ table_name = "magnitude_growth_parent_apps_reviews"
 AltairSaver.save(fig_final, table_name, filetypes=["html", "svg", "png"])
 
 # %%
+"; ".join(
+    [
+        f"{row.Category}: {row.Magnitude:.0f} reviews per year ({row.Growth:.0f}% growth)"
+        for i, row in reviews_magnitude_vs_growth.head(6).iterrows()
+    ]
+)
+
+# %%
 # Short term trend (2019 -> 2020)
 values_title_ = "Number of reviews"
 values_title = "Growth"
@@ -2404,6 +2428,15 @@ table_name = "app_installations_parent_apps"
 utils.save_data_table(installs_by_cluster, table_name)
 AltairSaver.save(fig, table_name, filetypes=["html", "svg", "png"])
 
+# %%
+"; ".join(
+    [
+        f"{row.Category}: {row['Number of installations (thousands)']}"
+        for i, row in installs_by_cluster.iterrows()
+    ]
+)
+
+
 # %% [markdown]
 # #### Scores
 
@@ -2474,6 +2507,10 @@ fig = pu.configure_plots(fig, chart_title, chart_subtitle)
 fig
 
 # %%
+"; ".join([f"{row.Category}: {row['Score']}" for i, row in score_by_cluster.iterrows()])
+
+
+# %%
 importlib.reload(utils)
 table_name = "app_scores_parent_apps"
 utils.save_data_table(score_by_cluster, table_name)
@@ -2507,6 +2544,9 @@ sort_order = [
 ]
 
 # %%
+len(score_by_cluster_full)
+
+# %%
 chart_title = "Parenting app scores"
 chart_subtitle = "Average scores on Play Store by app category"
 tooltip = [labels_title, values_title]
@@ -2538,6 +2578,70 @@ error_bars = (
 
 fig = (
     (bars + error_bars)
+    .configure_axis(
+        gridDash=[1, 7],
+        gridColor="grey",
+        labelFontSize=pu.FONTSIZE_NORMAL,
+        titleFontSize=pu.FONTSIZE_NORMAL,
+    )
+    .configure_view(strokeWidth=0)
+)
+fig
+
+# %%
+fig = (
+    alt.Chart(
+        score_by_cluster,
+        width=300,
+        height=300,
+    )
+    .mark_bar(color=pu.NESTA_COLOURS[0])
+    .encode(
+        x=alt.X(
+            f"{values_title}:Q",
+            title=values_title,
+            scale=alt.Scale(domain=(0, 5.1)),
+            axis=alt.Axis(labelAlign="center", tickCount=4),
+        ),
+        y=alt.Y(
+            f"{labels_title}:N",
+            title=labels_title,
+            sort=sort_order,
+            axis=alt.Axis(labelLimit=200),
+        ),
+        tooltip=tooltip,
+    )
+)
+
+# fig
+
+hp_agg = (
+    score_by_cluster_full.groupby("Category")["Score"]
+    .agg(["mean", "std"])
+    .assign(
+        error_lower=lambda df: df["mean"] - 1 * df["std"],
+        error_upper=lambda df: df["mean"] + 1 * df["std"],
+    )
+    .reset_index()
+)
+
+error_bars = (
+    alt.Chart(hp_agg)
+    .mark_rule()
+    .encode(
+        y=alt.Y("Category", sort=sort_order),
+        x="error_lower",
+        x2="error_upper",
+    )
+)
+
+# means = alt.Chart(hp_agg).mark_circle(color='black').encode(
+#     x='Origin',
+#     y='mean')
+
+# error_bars + means
+fig = (
+    (fig + error_bars)
     .configure_axis(
         gridDash=[1, 7],
         gridColor="grey",
@@ -2749,6 +2853,10 @@ fig_
 AltairSaver.save(fig_, "parent_apps_release_growth", filetypes=["html", "svg", "png"])
 
 # %%
+"; ".join([f"{row.Category}: {row.Growth*100:.0f}%" for i, row in df_long.iterrows()])
+
+
+# %%
 fig_final = (
     alt.hconcat(fig_ts, fig)
     .configure_axis(
@@ -2802,6 +2910,95 @@ app_details.sort_values("minInstalls", ascending=False)[
 
 # %%
 app_details.appId.iloc[0]
+
+# %% [markdown]
+# ## Exporting tables
+
+# %% [markdown]
+# ### Export app table
+
+# %%
+columns = [
+    "appId",
+    "title",
+    "summary",
+    "description",
+    "minInstalls",
+    "score",
+    "ratings",
+    "reviews",
+    "price",
+    "free",
+    "currency",
+    "offersIAP",
+    "inAppProductPrice",
+    "developer",
+    "developerEmail",
+    "developerWebsite",
+    "developerAddress",
+    "privacyPolicy",
+    "genre",
+    "genreId",
+    "contentRating",
+    "adSupported",
+    "containsAds",
+    "released",
+    "releaseYear",
+    "version",
+    "similarApps",
+    "url",
+    "country_code",
+    "cluster",
+    "user",
+]
+
+# %%
+df = (
+    app_details[columns]
+    .rename(columns={"cluster": "category"})
+    .sort_values(["user", "category", "minInstalls", "score"])
+)
+df.to_csv(PROJECT_DIR / "outputs/data/finals/apps.csv", index=False)
+
+# %%
+for p in df.columns.to_list():
+    print(p)
+
+# %% [markdown]
+# ### Export developer table
+
+# %%
+columns = [
+    "developer",
+    "developerEmail",
+    "developerWebsite",
+    "developerAddress",
+]
+
+# %%
+developer_counts = (
+    app_details.groupby(["user", "developer"])
+    .agg(
+        appCounts=("appId", "count"),
+        apps=("title", lambda x: list(x)),
+        appId=("appId", lambda x: list(x)),
+        appCategories=("cluster", lambda x: list(x)),
+    )
+    .reset_index()
+    .sort_values(["user", "appCounts"], ascending=False)
+)
+
+# %%
+df = (
+    app_details.drop_duplicates("developer")[columns]
+    .merge(developer_counts, on="developer")
+    .sort_values(["user", "appCounts"], ascending=False)
+)
+df.to_csv(PROJECT_DIR / "outputs/data/finals/app_developers.csv", index=False)
+
+# %%
+for p in df.columns.to_list():
+    print(p)
 
 # %% [markdown]
 # ## Comparisons with Play Store

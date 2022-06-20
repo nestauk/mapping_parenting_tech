@@ -28,10 +28,14 @@ We will update this section with more details and instructions as we further ref
 
 ## :floppy_disk: Datasets
 
-The collected datasets can be found here:
+Data tables with apps and companies in this space:
+
+- [Mapping parenting tech: Data tables](https://docs.google.com/spreadsheets/d/1KELT0mLeMC565blGOxHj7soLx4qK6pzdUx7xqjNy29k/edit?usp=sharing) (Google Sheet)
+
+The raw collected datasets on apps can be found here:
 
 - [play_store.zip](https://discovery-hub-open-data.s3.eu-west-2.amazonaws.com/mapping_parenting_tech/data/play_store.zip): HTML files fetched from Play Store website (used to extract initial set of app identifiers), and a table with apps and their categories that were rated relevant by manual inspection
-- [all_app_details.json](https://discovery-hub-open-data.s3.eu-west-2.amazonaws.com/mapping_parenting_tech/data/all_app_details.json): Data collected using google-play-scraper about all apps considered in this study
+- [all_app_details.json](https://discovery-hub-open-data.s3.eu-west-2.amazonaws.com/mapping_parenting_tech/data/all_app_details.json): Data collected using google-play-scraper about all apps considered in this study (including those that were rejected in the manual inspection stage)
 - [app_reviews.zip](https://discovery-hub-open-data.s3.eu-west-2.amazonaws.com/mapping_parenting_tech/data/app_reviews.zip): App reviews for all apps that were rated relevant by manual inspection
 
 ## :handshake: Contributor guidelines
